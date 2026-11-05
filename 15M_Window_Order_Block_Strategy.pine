@@ -2,10 +2,13 @@
 // Same reading as 15M Window Order Block. Add this file or that indicator,
 // not both. The order fills at the close of the bar that prints the signal.
 // The label marks the LTF candle that traded the block.
-// Size is 1. One order per New York day, and only at 9:30 or later. The stop
-// has to be 15 points or closer. A later signal that day does not enter and
-// does not replace the stop or target. The next day, an opposite signal
-// closes the open side and opens the new one. The stop is the far side of
+// Size is 1. The block window is 9:30 until 16:00 New York, the same session
+// the 1-Candle structure uses. 16:00 is not included. One order per New York
+// day, and only at 10:05 or later. The stop has to be 15 points or closer.
+// A later signal that day does not enter and does not replace the stop or
+// target. A trade opened before 15:55 is closed at 15:55 the same day. The
+// next day, an opposite signal closes the open side and opens the new one.
+// The stop is the far side of
 // that LTF block. The target is the same price the green line uses. With no
 // target, the order keeps the stop and has no limit. A target closer than
 // the stop leaves the signal and the order off.
@@ -15,8 +18,8 @@ strategy("15M Window Order Block Strategy", shorttitle = "15M OB St", overlay = 
      default_qty_type = strategy.fixed, default_qty_value = 1,
      initial_capital = 100000)
 
-// HTF OB is each leg whose first candle opens from 9:00 through 9:45 New York,
-// including 9:45. The HTF OB input chooses those candles. A choice below this
+// HTF OB is each leg whose first candle opens from 9:30 until 16:00 New York.
+// 16:00 is not included. The HTF OB input chooses those candles. A choice below this
 // chart is ignored and nothing is drawn. A leg is the consecutive candles in
 // one direction. The open is the first candle of that leg. The box is always
 // that whole leg, from its high to its low. Qualify by does not change the
@@ -59,10 +62,16 @@ string ltfChoice = input.timeframe("", "LTF OB", group = GRP_TF,
 
 string GRP_WINDOW = "New York Window"
 int startHour = input.int(9, "From", minval = 0, maxval = 23, group = GRP_WINDOW, inline = "from")
-int startMinute = input.int(0, ":", minval = 0, maxval = 59, group = GRP_WINDOW, inline = "from")
-int endHour = input.int(9, "through", minval = 0, maxval = 23, group = GRP_WINDOW, inline = "through")
-int endMinute = input.int(45, ":", minval = 0, maxval = 59, group = GRP_WINDOW, inline = "through",
-     tooltip = "The end is included. An HTF leg that starts at 9:45 is included. Later closes can finish after 9:45 and still confirm it. One close is not enough. The window does not filter the LTF order block.")
+int startMinute = input.int(30, ":", minval = 0, maxval = 59, group = GRP_WINDOW, inline = "from")
+int endHour = input.int(16, "until", minval = 0, maxval = 23, group = GRP_WINDOW, inline = "through")
+int endMinute = input.int(0, ":", minval = 0, maxval = 59, group = GRP_WINDOW, inline = "through",
+     tooltip = "The end is not included. An HTF leg that opens at 16:00 is left out. A leg that opens at 15:45 is included. Later closes can finish after 16:00 and still confirm it. One close is not enough. The window does not filter the LTF order block. The default is 9:30 until 16:00.")
+int minuteWindowStart = input.int(0, "Minute Window", minval = 0, maxval = 59, group = GRP_WINDOW, inline = "minute",
+     tooltip = "Minute of the hour. 0 to 60 keeps every minute. 1 to 55 drops the candle that opens at :00.")
+int minuteWindowEnd = input.int(60, "to", minval = 1, maxval = 60, group = GRP_WINDOW, inline = "minute",
+     tooltip = "Exclusive end minute in the same hour. 60 includes the full hour.")
+bool skipSundays = input.bool(false, "Skip Sundays", group = GRP_WINDOW,
+     tooltip = "A Sunday candle does not start an HTF leg. An open trade keeps its stop and target. The default is off.")
 
 string GRP_DISPLAY = "Display"
 bool hideMitigated = input.bool(true, "Hide mitigated", group = GRP_DISPLAY,
@@ -82,11 +91,13 @@ int swingLength = input.int(2, "Target Swing Length", minval = 1, maxval = 20, g
      tooltip = "Bars required on each side of a target-timeframe pivot. The pivot is usable only after that many later candles have closed.")
 
 string GRP_ORDER = "Orders"
-int orderFromHour = input.int(9, "Order From", minval = 0, maxval = 23, group = GRP_ORDER, inline = "orderfrom")
-int orderFromMinute = input.int(30, ":", minval = 0, maxval = 59, group = GRP_ORDER, inline = "orderfrom",
-     tooltip = "No new order before this New York clock. A signal before it still draws. It does not use up the one order for that day. The block window stays on its own hours. The default is 9:30.")
+int orderFromHour = input.int(10, "Order From", minval = 0, maxval = 23, group = GRP_ORDER, inline = "orderfrom")
+int orderFromMinute = input.int(5, ":", minval = 0, maxval = 59, group = GRP_ORDER, inline = "orderfrom",
+     tooltip = "No new order before this New York clock. A signal before it still draws. It does not use up the one order for that day. The block window stays on its own hours. 0:00 turns this check off. The default is 10:05.")
 float maxStopPoints = input.float(15, "Max Stop", minval = 0, step = 0.25, group = GRP_ORDER,
      tooltip = "Points from the signal close to the far side of the LTF block. A wider stop does not enter and does not use up the one order for that day. 0 leaves every stop through. The default is 15.")
+bool sessionFlat = input.bool(true, "Flat At 15:55", group = GRP_ORDER,
+     tooltip = "A trade opened before 15:55 New York, on that same calendar day, is closed on the first bar at or after 15:55. The entry bar is left alone. A fill at 15:55 or later is not flattened. A trade still open after midnight is not flattened the next day.")
 
 string GRP_COLORS = "Colors"
 color htfBull = input.color(color.new(color.rgb(149, 117, 205), 75), "HTF Bullish", group = GRP_COLORS)
@@ -118,8 +129,10 @@ bool targetOn = swingTargetOn or maxTarget > 0
 int targetMs = targetChoice == "4H" ? 14400000 : targetChoice == "1H" ? 3600000 : targetChoice == "15M" ? 900000 : targetChoice == "5M" ? 300000 : targetChoice == "1M" ? 60000 : timeframe.in_seconds() * 1000
 int targetSpan = targetMs * 2
 
-if barstate.isfirst and startMinuteOfDay > endMinuteOfDay
-    runtime.error("Window end is included and has to be at or after the start.")
+if barstate.isfirst and startMinuteOfDay >= endMinuteOfDay
+    runtime.error("Window end is not included and has to be later than the start.")
+if barstate.isfirst and minuteWindowStart >= minuteWindowEnd
+    runtime.error("Minute window end must be later than the minute window start.")
 
 // [1] is the closed candle. lookahead_on publishes it on the chart bar that
 // opens the next period. A timeframe equal to this chart is read directly.
@@ -138,7 +151,11 @@ bool ltfChanged = timeframe.change(ltfRequestTf)
 
 f_inWindow(int t) =>
     int minuteOfDay = hour(t, NY_TIMEZONE) * 60 + minute(t, NY_TIMEZONE)
-    minuteOfDay >= startMinuteOfDay and minuteOfDay <= endMinuteOfDay
+    int minuteOfHour = minute(t, NY_TIMEZONE)
+    bool dayInside = minuteOfDay >= startMinuteOfDay and minuteOfDay < endMinuteOfDay
+    bool minuteInside = minuteOfHour >= minuteWindowStart and minuteOfHour < minuteWindowEnd
+    bool sundayInside = not skipSundays or dayofweek(t, NY_TIMEZONE) != dayofweek.sunday
+    dayInside and minuteInside and sundayInside
 
 type Mark
     box zone
@@ -648,6 +665,23 @@ if sellSignal and takeOrder
     if not na(fill.sellTarget)
         strategy.exit("15M OB Short Exit", from_entry = "15M OB Short", stop = fill.sellStop, limit = fill.sellTarget)
     orderDay := nyDay
+
+// A same-session trade opened before 15:55 is closed on the first bar at or after 15:55.
+// The entry bar is skipped. A fill at 15:55 or later is not flattened, and neither is a trade held past midnight.
+bool sessionFlatDue = false
+if sessionFlat and strategy.position_size != 0 and strategy.opentrades > 0
+    int flatEntryTime = strategy.opentrades.entry_time(0)
+    int flatEntryDay = year(flatEntryTime, NY_TIMEZONE) * 10000 + month(flatEntryTime, NY_TIMEZONE) * 100 + dayofmonth(flatEntryTime, NY_TIMEZONE)
+    int flatBarDay = year(time, NY_TIMEZONE) * 10000 + month(time, NY_TIMEZONE) * 100 + dayofmonth(time, NY_TIMEZONE)
+    int flatEntryMinute = hour(flatEntryTime, NY_TIMEZONE) * 60 + minute(flatEntryTime, NY_TIMEZONE)
+    int flatBarMinute = hour(time, NY_TIMEZONE) * 60 + minute(time, NY_TIMEZONE)
+    bool flatSame = flatEntryDay == flatBarDay and flatEntryMinute < 15 * 60 + 55
+    bool flatClock = flatBarMinute >= 15 * 60 + 55
+    bool flatLive = bar_index > strategy.opentrades.entry_bar_index(0)
+    sessionFlatDue := flatSame and flatClock and flatLive
+if sessionFlatDue
+    strategy.close("15M OB Long", comment = "session")
+    strategy.close("15M OB Short", comment = "session")
 
 alertcondition(buySignal and takeOrder, title = "15M OB Buy",
      message = "15M OB Buy: price retested a bullish LTF order block.")
