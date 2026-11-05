@@ -3,7 +3,11 @@
 // not both. The order fills at the close of the bar that prints the signal.
 // The label marks the LTF candle that traded the block.
 // Size is 1. The block window is 9:30 until 16:00 New York, the same session
-// the 1-Candle structure uses. 16:00 is not included. One order per New York
+// the 1-Candle structure uses. 16:00 is not included. A 15-minute leg qualifies
+// only after price has swept the last closed 4-hour candle and closed back
+// inside it. A swept low allows a bullish leg. A swept high allows a bearish
+// leg. That sweep stays valid until a later close goes back through its side.
+// The leg's first open has to be after the sweep. One order per New York
 // day, and only at 10:05 or later. The stop has to be 15 points or closer.
 // A later signal that day does not enter and does not replace the stop or
 // target. A trade opened before 15:55 is closed at 15:55 the same day. The
@@ -18,8 +22,9 @@ strategy("15M Window Order Block Strategy", shorttitle = "15M OB St", overlay = 
      default_qty_type = strategy.fixed, default_qty_value = 1,
      initial_capital = 100000)
 
-// HTF OB is each leg whose first candle opens from 9:30 until 16:00 New York.
-// 16:00 is not included. The HTF OB input chooses those candles. A choice below this
+// HTF OB is each leg whose first candle opens from 9:30 until 16:00 New York,
+// after a same-direction sweep of the last closed 4-hour candle. 16:00 is not
+// included. The HTF OB input chooses those candles. A choice below this
 // chart is ignored and nothing is drawn. A leg is the consecutive candles in
 // one direction. The open is the first candle of that leg. The box is always
 // that whole leg, from its high to its low. Qualify by does not change the
@@ -72,6 +77,10 @@ int minuteWindowEnd = input.int(60, "to", minval = 1, maxval = 60, group = GRP_W
      tooltip = "Exclusive end minute in the same hour. 60 includes the full hour.")
 bool skipSundays = input.bool(false, "Skip Sundays", group = GRP_WINDOW,
      tooltip = "A Sunday candle does not start an HTF leg. An open trade keeps its stop and target. The default is off.")
+
+string GRP_LIQUIDITY = "Liquidity"
+string liquidityChoice = input.string("4H", "Liquidity Timeframe", options = ["Off", "4H"], group = GRP_LIQUIDITY,
+     tooltip = "A 15-minute leg qualifies only after a sweep of the last closed candle on this timeframe. Price has to trade beyond that candle and close back inside it. A swept low allows a bullish leg. A swept high allows a bearish leg. The sweep stays valid until a later close goes back through that side. The leg's first open has to be after the sweep. The two qualifying closes still come after that open. Off qualifies every leg inside the window. The default is 4H. This does not filter the LTF order block.")
 
 string GRP_DISPLAY = "Display"
 bool hideMitigated = input.bool(true, "Hide mitigated", group = GRP_DISPLAY,
@@ -145,9 +154,20 @@ if barstate.isfirst and minuteWindowStart >= minuteWindowEnd
 [closedTargetTime, closedTargetHigh, closedTargetLow] = request.security(
      syminfo.tickerid, targetPine, [time[1], high[1], low[1]],
      lookahead = barmerge.lookahead_on)
+bool liquidityOn = liquidityChoice != "Off" and timeframe.in_seconds("240") >= chartSeconds
+[closedLiqTime, closedLiqHigh, closedLiqLow] = request.security(
+     syminfo.tickerid, "240", [time[1], high[1], low[1]],
+     lookahead = barmerge.lookahead_on)
 
 bool htfChanged = timeframe.change(htfRequestTf)
 bool ltfChanged = timeframe.change(ltfRequestTf)
+
+var bool bullSweepValid = false
+var int bullSweepTime = na
+var float bullSweepLevel = na
+var bool bearSweepValid = false
+var int bearSweepTime = na
+var float bearSweepLevel = na
 
 f_inWindow(int t) =>
     int minuteOfDay = hour(t, NY_TIMEZONE) * 60 + minute(t, NY_TIMEZONE)
@@ -156,6 +176,22 @@ f_inWindow(int t) =>
     bool minuteInside = minuteOfHour >= minuteWindowStart and minuteOfHour < minuteWindowEnd
     bool sundayInside = not skipSundays or dayofweek(t, NY_TIMEZONE) != dayofweek.sunday
     dayInside and minuteInside and sundayInside
+
+f_liquidityAllows(int dir, int openTime) =>
+    bool allowed = true
+    if liquidityOn and dir == -1
+        allowed := bullSweepValid and not na(bullSweepTime) and openTime > bullSweepTime
+    if liquidityOn and dir == 1
+        allowed := bearSweepValid and not na(bearSweepTime) and openTime > bearSweepTime
+    allowed
+
+f_liquidityStill(int dir) =>
+    bool allowed = true
+    if liquidityOn and dir == -1
+        allowed := bullSweepValid
+    if liquidityOn and dir == 1
+        allowed := bearSweepValid
+    allowed
 
 type Mark
     box zone
@@ -450,7 +486,9 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
         st.curBot := st.barLow
         st.curStartTime := st.barTime
         st.curCount := 1
-        st.curFromWindow := not useWindow or f_inWindow(st.barTime)
+        bool sessionOk = not useWindow or f_inWindow(st.barTime)
+        bool sweepOk = not useWindow or f_liquidityAllows(dir, st.barTime)
+        st.curFromWindow := sessionOk and sweepOk
     if newLeg and dir == 0
         st.curDir := 0
         st.curCount := 0
@@ -484,7 +522,8 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
             bool gateOk = not needsRetest or f_overlapsZone(gateZones, cand.dir, cand.top, cand.bot)
             float mid = filterHalf ? f_hourMid(cand.startTime) : na
             bool halfOk = not filterHalf or (not na(mid) and (cand.dir == -1 ? cand.top <= mid : cand.bot >= mid))
-            bool confirmNow = qualified and cand.throughCount >= 2 and not cand.drawn and gateOk and halfOk
+            bool liquidityStill = not useWindow or f_liquidityStill(cand.dir)
+            bool confirmNow = qualified and cand.throughCount >= 2 and not cand.drawn and gateOk and halfOk and liquidityStill
             bool superseded = false
             if confirmNow and array.size(zones) > 0
                 for z = array.size(zones) - 1 to 0
@@ -526,7 +565,8 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
             if qualifyByWick and wickThrough
                 failed := false
             bool rejectHalf = filterHalf and not halfOk and cand.throughCount >= 2 and not cand.drawn
-            if failed or rejectHalf or superseded
+            bool rejectLiquidity = useWindow and not liquidityStill and cand.throughCount >= 2 and not cand.drawn
+            if failed or rejectHalf or rejectLiquidity or superseded
                 if cand.drawn and array.size(zones) > 0
                     for z = array.size(zones) - 1 to 0
                         Mark zone = array.get(zones, z)
@@ -622,6 +662,21 @@ if swingTargetOn and not na(closedTargetTime) and (lastTargetTime < 0 or closedT
 Fill fill = Fill.new()
 if barstate.isconfirmed
     f_noteHour(time, high, low)
+    bool liqReady = liquidityOn and not na(closedLiqTime) and not na(closedLiqHigh) and not na(closedLiqLow) and closedLiqHigh > closedLiqLow
+    if liqReady and bullSweepValid and not na(bullSweepTime) and time != bullSweepTime and close < bullSweepLevel
+        bullSweepValid := false
+    if liqReady and bearSweepValid and not na(bearSweepTime) and time != bearSweepTime and close > bearSweepLevel
+        bearSweepValid := false
+    bool sweptLow = liqReady and low < closedLiqLow and close > closedLiqLow and close < closedLiqHigh
+    bool sweptHigh = liqReady and high > closedLiqHigh and close < closedLiqHigh and close > closedLiqLow
+    if sweptLow
+        bullSweepValid := true
+        bullSweepTime := time
+        bullSweepLevel := closedLiqLow
+    if sweptHigh
+        bearSweepValid := true
+        bearSweepTime := time
+        bearSweepLevel := closedLiqHigh
 if htfOk
     f_take(htfLeg, htfIsChart, htfSeconds, htfChanged, htfOpen, htfHigh, htfLow, htfClose, htfTime)
 if htfOk and htfLeg.ready
