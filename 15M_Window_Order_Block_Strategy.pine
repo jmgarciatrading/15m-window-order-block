@@ -1,0 +1,599 @@
+//@version=6
+// Same reading as 15M Window Order Block. Add this file or that indicator,
+// not both. The order fills at the close of the LTF candle that retests the
+// block. Size is 1. One position: an opposite signal closes it and opens the
+// new side. The stop is the far side of that LTF block. The target is the
+// same price the green line uses. With no target, the order keeps the stop
+// and has no limit. A target closer than the stop leaves the signal and the
+// order off.
+strategy("15M Window Order Block Strategy", shorttitle = "15M OB St", overlay = true,
+     max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500,
+     pyramiding = 0, process_orders_on_close = true,
+     default_qty_type = strategy.fixed, default_qty_value = 1,
+     initial_capital = 100000)
+
+// HTF OB is each leg whose first candle opens from 9:00 through 9:45 New York,
+// including 9:45. The HTF OB input chooses those candles. A choice below this
+// chart is ignored and nothing is drawn. A leg is the consecutive candles in
+// one direction. The open is the first candle of that leg. The box is always
+// that whole leg, from its high to its low. Qualify by does not change the
+// box. Close qualifies a later candle when its close is through that open.
+// High/Low qualifies it when that candle's high or low trades that open. Two
+// are required. A later close back through the open removes a block that has
+// not been retested. A retested block stays. Equality counts. Candle color
+// does not matter. One close is not enough. In a stack, only the latest formed
+// and confirmed order block is kept. A retested block is not replaced.
+// A bullish HTF box has to sit in the discount of its New York hour, at or
+// below that hour's midpoint. A bearish HTF box has to sit in the premium, at
+// or above the midpoint. Touching the midpoint counts. A block that crosses
+// it does not. The LTF order block is the latest same-direction leg that
+// overlaps a drawn HTF box. The window does not apply to it, and premium and
+// discount do not filter it. It can finish before the HTF box is confirmed,
+// and it is drawn once that box exists. A later overlapping leg replaces an
+// earlier one that has not been retested. When this chart is the HTF, or the
+// LTF choice is below this chart, or it is not below the HTF, only the HTF
+// blocks are shown. Both boxes extend right until price closes beyond the LTF
+// block and a later LTF candle trades back into it. That retest stops the
+// LTF block and the HTF block it overlaps. The stop is the far side of that
+// LTF block. The target is the newest swing beyond the retest close, and two
+// times that stop distance when no swing is there. BUY is a bullish retest
+// and SELL is a bearish retest. The label is removed when its block is
+// removed. That tap expires every zone in the opposite direction, and its
+// label with it. A target closer than the stop leaves the signal off. A block
+// is also done when a later candle of its own timeframe has traded both its
+// high and its low.
+
+string GRP_TF = "Timeframe"
+string htfChoice = input.timeframe("15", "HTF OB", group = GRP_TF,
+     tooltip = "Higher timeframe of the window order block. 5 is 5 minutes. 5 works on a 1-minute chart. 60 works on a 15-minute chart. A choice below this chart is ignored and nothing is drawn.")
+string ltfChoice = input.timeframe("", "LTF OB", group = GRP_TF,
+     tooltip = "Lower timeframe order block. Empty uses this chart. The latest leg that overlaps a valid HTF box is kept, even if that leg finished before the HTF box was confirmed. Premium and discount do not filter it. Once price closes beyond it, the next LTF candle that trades back into it stops this block and the HTF block. When this chart is the HTF, or this choice is below the chart, or it is not below the HTF, only the HTF blocks are shown.")
+
+string GRP_WINDOW = "New York Window"
+int startHour = input.int(9, "From", minval = 0, maxval = 23, group = GRP_WINDOW, inline = "from")
+int startMinute = input.int(0, ":", minval = 0, maxval = 59, group = GRP_WINDOW, inline = "from")
+int endHour = input.int(9, "through", minval = 0, maxval = 23, group = GRP_WINDOW, inline = "through")
+int endMinute = input.int(45, ":", minval = 0, maxval = 59, group = GRP_WINDOW, inline = "through",
+     tooltip = "The end is included. An HTF leg that starts at 9:45 is included. Later closes can finish after 9:45 and still confirm it. One close is not enough. The window does not filter the LTF order block.")
+
+string GRP_DISPLAY = "Display"
+bool hideMitigated = input.bool(true, "Hide mitigated", group = GRP_DISPLAY,
+     tooltip = "An order block is mitigated once a later candle of its timeframe has traded both its high and its low. Hide those boxes.")
+bool showSignals = input.bool(true, "Show buy/sell signals", group = GRP_DISPLAY,
+     tooltip = "BUY sits under the LTF block when a bullish retest closes with the stop below it. SELL sits over a bearish retest. The order uses that same close, stop, and target. That tap expires every zone in the opposite direction. The label is removed when that block is removed. A target closer than the stop leaves the signal and the order off. Equal to that distance still prints. Uncheck to hide the labels and place no orders.")
+string qualifyBy = input.string("Close", "Qualify by", options = ["Close", "High/Low"], group = GRP_DISPLAY,
+     tooltip = "The box is always the whole leg, from its high to its low. This only chooses how a later candle qualifies. Close counts the candle when its close is through the first candle's open. High/Low counts it when that candle's high or low trades the open, even if the close stays short. Two candles are required. A later close back through the open removes a block that has not been retested. A block that has already been retested stays. A wick that trades the open does not remove itself. Equality counts.")
+bool qualifyByWick = qualifyBy == "High/Low"
+
+string GRP_TARGET = "Target"
+string targetChoice = input.string("15M", "Timeframe Target", options = ["Off", "1M", "5M", "15M", "1H", "4H"], group = GRP_TARGET,
+     tooltip = "Take profit is the newest confirmed swing on this timeframe beyond the LTF retest close. A bullish block uses a swing high above that close. A bearish block uses a swing low below it. A wick through the swing does not skip it. It has to be this chart or higher. A lower choice is ignored. When no swing is beyond the close, the target is two times the distance from that close to the far side of the LTF block. Off does not use a swing. Max Target then sets the target, and 0 leaves it empty. A target closer than the stop is left off. Equal to that distance still draws.")
+int maxTarget = input.int(0, "Max Target", minval = 0, maxval = 50, group = GRP_TARGET,
+     tooltip = "When Timeframe Target is Off, the target is this multiple of the stop distance. 3 draws it at 1:3, and 0 leaves the target empty. When a swing timeframe is selected, this caps a swing farther than this multiple. A closer swing stays. 0 leaves that swing unchanged. The two-times fallback stays at two times.")
+int swingLength = input.int(2, "Target Swing Length", minval = 1, maxval = 20, group = GRP_TARGET,
+     tooltip = "Bars required on each side of a target-timeframe pivot. The pivot is usable only after that many later candles have closed.")
+
+string GRP_COLORS = "Colors"
+color htfBull = input.color(color.new(color.rgb(149, 117, 205), 75), "HTF Bullish", group = GRP_COLORS)
+color htfBear = input.color(color.new(color.rgb(171, 71, 188), 75), "HTF Bearish", group = GRP_COLORS)
+color ltfBull = input.color(color.new(color.rgb(33, 150, 243), 75), "LTF Bullish", group = GRP_COLORS)
+color ltfBear = input.color(color.new(color.rgb(244, 67, 54), 75), "LTF Bearish", group = GRP_COLORS)
+
+const string NY_TIMEZONE = "America/New_York"
+const int MAX_ZONES = 500
+
+int startMinuteOfDay = startHour * 60 + startMinute
+int endMinuteOfDay = endHour * 60 + endMinute
+int chartSeconds = timeframe.in_seconds()
+bool ltfIsChart = ltfChoice == ""
+int htfSeconds = timeframe.in_seconds(htfChoice)
+int ltfSeconds = ltfIsChart ? chartSeconds : timeframe.in_seconds(ltfChoice)
+bool htfIsChart = htfSeconds == chartSeconds
+bool ltfSameChart = ltfSeconds == chartSeconds
+string htfRequestTf = na(htfSeconds) or htfSeconds < chartSeconds ? timeframe.period : htfChoice
+string ltfRequestTf = ltfIsChart or na(ltfSeconds) or ltfSeconds < chartSeconds ? timeframe.period : ltfChoice
+
+bool htfOk = not na(htfSeconds) and htfSeconds >= chartSeconds
+bool ltfOk = htfOk and not na(ltfSeconds) and ltfSeconds >= chartSeconds and ltfSeconds < htfSeconds
+
+string targetPine = targetChoice == "4H" ? "240" : targetChoice == "1H" ? "60" : targetChoice == "15M" ? "15" : targetChoice == "5M" ? "5" : targetChoice == "1M" ? "1" : timeframe.period
+int targetSeconds = timeframe.in_seconds(targetPine)
+bool swingTargetOn = targetChoice != "Off" and not na(targetSeconds) and targetSeconds >= chartSeconds
+bool targetOn = swingTargetOn or maxTarget > 0
+int targetMs = targetChoice == "4H" ? 14400000 : targetChoice == "1H" ? 3600000 : targetChoice == "15M" ? 900000 : targetChoice == "5M" ? 300000 : targetChoice == "1M" ? 60000 : timeframe.in_seconds() * 1000
+int targetSpan = targetMs * 2
+
+if barstate.isfirst and startMinuteOfDay > endMinuteOfDay
+    runtime.error("Window end is included and has to be at or after the start.")
+
+// [1] is the closed candle. lookahead_on publishes it on the chart bar that
+// opens the next period. A timeframe equal to this chart is read directly.
+[htfOpen, htfHigh, htfLow, htfClose, htfTime] = request.security(
+     syminfo.tickerid, htfRequestTf, [open[1], high[1], low[1], close[1], time[1]],
+     lookahead = barmerge.lookahead_on)
+[ltfOpen, ltfHigh, ltfLow, ltfClose, ltfTime] = request.security(
+     syminfo.tickerid, ltfRequestTf, [open[1], high[1], low[1], close[1], time[1]],
+     lookahead = barmerge.lookahead_on)
+[closedTargetTime, closedTargetHigh, closedTargetLow] = request.security(
+     syminfo.tickerid, targetPine, [time[1], high[1], low[1]],
+     lookahead = barmerge.lookahead_on)
+
+bool htfChanged = timeframe.change(htfRequestTf)
+bool ltfChanged = timeframe.change(ltfRequestTf)
+
+f_inWindow(int t) =>
+    int minuteOfDay = hour(t, NY_TIMEZONE) * 60 + minute(t, NY_TIMEZONE)
+    minuteOfDay >= startMinuteOfDay and minuteOfDay <= endMinuteOfDay
+
+type Mark
+    box zone
+    float top
+    float bottom
+    int createdBar
+    bool live
+    int uid
+    int dir
+    bool hitTop = false
+    bool hitBot = false
+    int startBar = 0
+    bool departed = false
+    label signal = na
+    bool tapped = false
+
+type Fill
+    float buyStop = na
+    float buyTarget = na
+    float sellStop = na
+    float sellTarget = na
+
+type Candidate
+    int dir
+    int startBar
+    int endBar
+    float openPrice
+    float top
+    float bot
+    int startTime
+    int throughCount
+    bool drawn = false
+    int zoneId = -1
+
+type Leg
+    int curDir = 0
+    int curStart = 0
+    int curEnd = 0
+    float curOpen = 0.0
+    float curTop = 0.0
+    float curBot = 0.0
+    int curStartTime = 0
+    int curCount = 0
+    bool curFromWindow = false
+    int periodStartBar = -1
+    int periodOpenTime = -1
+    int lastClosedTime = -1
+    bool ready = false
+    float barOpen = 0.0
+    float barHigh = 0.0
+    float barLow = 0.0
+    float barClose = 0.0
+    int barTime = 0
+    int barLeft = 0
+    int barRight = 0
+
+type Seq
+    int n
+
+type HourSpan
+    int key
+    float hi
+    float lo
+
+var array<Mark> htfZones = array.new<Mark>()
+var array<Candidate> htfPending = array.new<Candidate>()
+var array<Mark> ltfZones = array.new<Mark>()
+var array<Candidate> ltfPending = array.new<Candidate>()
+var Leg htfLeg = Leg.new()
+var Leg ltfLeg = Leg.new()
+var Seq ids = Seq.new(0)
+var array<HourSpan> hourSpans = array.new<HourSpan>()
+var float[] targetHighs = array.new<float>()
+var float[] targetLows = array.new<float>()
+var int[] targetTimes = array.new<int>()
+var float[] swingPrices = array.new<float>()
+var int[] swingKinds = array.new<int>()
+var int[] swingTimes = array.new<int>()
+var int lastTargetTime = -1
+bool buySignal = false
+bool sellSignal = false
+
+f_hourKey(int t) =>
+    year(t, NY_TIMEZONE) * 1000000 + month(t, NY_TIMEZONE) * 10000 + dayofmonth(t, NY_TIMEZONE) * 100 + hour(t, NY_TIMEZONE)
+
+f_noteHour(int t, float hi, float lo) =>
+    int key = f_hourKey(t)
+    bool opened = array.size(hourSpans) == 0
+    if array.size(hourSpans) > 0
+        opened := array.get(hourSpans, array.size(hourSpans) - 1).key != key
+    if opened
+        if array.size(hourSpans) >= 500
+            array.shift(hourSpans)
+        array.push(hourSpans, HourSpan.new(key, hi, lo))
+    if not opened
+        HourSpan span = array.get(hourSpans, array.size(hourSpans) - 1)
+        span.hi := math.max(span.hi, hi)
+        span.lo := math.min(span.lo, lo)
+
+f_hourMid(int t) =>
+    float mid = na
+    int key = f_hourKey(t)
+    if array.size(hourSpans) > 0
+        for n = array.size(hourSpans) - 1 to 0
+            HourSpan span = array.get(hourSpans, n)
+            if span.key == key
+                mid := (span.hi + span.lo) * 0.5
+                break
+    mid
+
+f_overlapsZone(array<Mark> zones, int dir, float top, float bot) =>
+    bool ok = false
+    if array.size(zones) > 0
+        for n = 0 to array.size(zones) - 1
+            Mark zone = array.get(zones, n)
+            bool overlaps = zone.top >= bot and zone.bottom <= top
+            if zone.dir == dir and overlaps
+                ok := true
+    ok
+
+f_take(Leg st, bool chartTf, int tfSeconds, bool changed, float sO, float sH, float sL, float sC, int sT) =>
+    st.ready := false
+    bool chartCandle = chartTf and barstate.isconfirmed
+    if chartCandle
+        st.ready := true
+        st.barOpen := open
+        st.barHigh := high
+        st.barLow := low
+        st.barClose := close
+        st.barTime := time
+        st.barLeft := bar_index
+        st.barRight := bar_index
+    bool higherCandle = not chartTf and tfSeconds > chartSeconds and changed and not na(sT) and (st.lastClosedTime < 0 or sT != st.lastClosedTime)
+    if higherCandle
+        bool closedBar = st.periodStartBar >= 0 and st.periodOpenTime == sT and bar_index > st.periodStartBar
+        if closedBar
+            st.ready := true
+            st.barOpen := sO
+            st.barHigh := sH
+            st.barLow := sL
+            st.barClose := sC
+            st.barTime := sT
+            st.barLeft := st.periodStartBar
+            st.barRight := bar_index - 1
+        st.lastClosedTime := sT
+        st.periodStartBar := bar_index
+        st.periodOpenTime := time
+
+latestSwing(float price, bool bullish) =>
+    float foundPrice = na
+    int foundTime = na
+    int kind = bullish ? 1 : -1
+    int count = array.size(swingPrices)
+    if not na(price) and count > 0
+        for swingIndex = count - 1 to 0
+            float swingPrice = array.get(swingPrices, swingIndex)
+            bool beyond = bullish ? swingPrice > price : swingPrice < price
+            if array.get(swingKinds, swingIndex) == kind and beyond
+                foundPrice := swingPrice
+                foundTime := array.get(swingTimes, swingIndex)
+                break
+    [foundPrice, foundTime]
+
+f_drawTarget(Mark zone, int when, float entry, Fill fill) =>
+    bool bullish = zone.dir == -1
+    float stop = bullish ? zone.bottom : zone.top
+    float risk = bullish ? entry - stop : stop - entry
+    bool stopOk = risk > 0
+    [swingPrice, foundTime] = latestSwing(entry, bullish)
+    float target = na
+    int swingTime = na
+    if stopOk and swingTargetOn
+        float fallback = bullish ? entry + risk * 2 : entry - risk * 2
+        target := na(swingPrice) ? fallback : swingPrice
+        if not na(swingPrice)
+            swingTime := foundTime
+    if stopOk and not swingTargetOn and maxTarget > 0
+        target := bullish ? entry + risk * maxTarget : entry - risk * maxTarget
+    if stopOk and maxTarget > 0 and not na(swingTime) and not na(target)
+        float reward = bullish ? target - entry : entry - target
+        if reward > maxTarget * risk
+            target := bullish ? entry + risk * maxTarget : entry - risk * maxTarget
+            swingTime := na
+    bool roomOk = na(target)
+    if not na(target)
+        float room = bullish ? target - entry : entry - target
+        if room >= risk
+            roomOk := true
+    bool markSignal = stopOk and roomOk and showSignals
+    int side = 0
+    if markSignal
+        string tip = "Stop " + str.tostring(stop, format.mintick)
+        if not na(target)
+            tip := tip + "\nTP " + str.tostring(target, format.mintick)
+        if bullish
+            zone.signal := label.new(when, stop, "BUY", xloc = xloc.bar_time, yloc = yloc.price,
+                 style = label.style_label_up, color = color.green, textcolor = color.white,
+                 size = size.small, tooltip = tip)
+            fill.buyStop := stop
+            fill.buyTarget := target
+            side := 1
+        if not bullish
+            zone.signal := label.new(when, stop, "SELL", xloc = xloc.bar_time, yloc = yloc.price,
+                 style = label.style_label_down, color = color.red, textcolor = color.white,
+                 size = size.small, tooltip = tip)
+            fill.sellStop := stop
+            fill.sellTarget := target
+            side := -1
+    if stopOk and roomOk and not na(target)
+        int stopSpan = ltfSeconds * 2000
+        line.new(when, stop, when + stopSpan, stop, xloc = xloc.bar_time, color = color.red, width = 1)
+        int origin = na(swingTime) ? when : swingTime
+        line.new(origin, target, origin + targetSpan, target, xloc = xloc.bar_time, color = color.green, width = 1)
+        if not na(swingTime) and swingTime != when
+            line.new(when, target, when + targetSpan, target, xloc = xloc.bar_time, color = color.green, width = 1)
+    side
+
+f_dropPending(array<Candidate> pending, int dir) =>
+    if array.size(pending) > 0
+        for i = array.size(pending) - 1 to 0
+            Candidate cand = array.get(pending, i)
+            if cand.dir == dir
+                array.remove(pending, i)
+
+f_erase(Mark zone) =>
+    box.delete(zone.zone)
+    if not na(zone.signal)
+        label.delete(zone.signal)
+
+f_expireDir(array<Mark> book, int dir, array<int> spared) =>
+    if array.size(book) > 0
+        for n = array.size(book) - 1 to 0
+            Mark zone = array.get(book, n)
+            bool kill = zone.dir == dir
+            if kill and array.size(spared) > 0
+                for s = 0 to array.size(spared) - 1
+                    if array.get(spared, s) == zone.uid
+                        kill := false
+            if kill
+                f_erase(zone)
+                array.remove(book, n)
+
+f_stopExtend(Mark zone, int right) =>
+    if zone.live
+        box.set_extend(zone.zone, extend.none)
+        box.set_right(zone.zone, right)
+        zone.live := false
+
+f_freezePair(array<Mark> gateZones, Mark zone, int right) =>
+    f_stopExtend(zone, right)
+    if array.size(gateZones) > 0
+        for h = array.size(gateZones) - 1 to 0
+            Mark higher = array.get(gateZones, h)
+            bool overlaps = higher.top >= zone.bottom and higher.bottom <= zone.top
+            if higher.dir == zone.dir and overlaps
+                f_stopExtend(higher, right)
+
+f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool useWindow, bool needsRetest, bool filterHalf, array<Mark> gateZones, color bullPaint, color bearPaint, array<Candidate> otherPending, Fill fill) =>
+    int dir = st.barClose > st.barOpen ? 1 : st.barClose < st.barOpen ? -1 : 0
+    bool legEnded = st.curCount > 0 and (dir == 0 or dir != st.curDir)
+    if legEnded and st.curFromWindow
+        if array.size(pending) > 0
+            for i = array.size(pending) - 1 to 0
+                Candidate older = array.get(pending, i)
+                bool stacked = older.top >= st.curBot and older.bot <= st.curTop
+                if not older.drawn and older.dir == st.curDir and stacked
+                    array.remove(pending, i)
+        array.push(pending, Candidate.new(st.curDir, st.curStart, st.curEnd, st.curOpen, st.curTop, st.curBot, st.curStartTime, 0))
+    bool newLeg = legEnded or st.curCount == 0
+    if newLeg and dir != 0
+        st.curDir := dir
+        st.curStart := st.barLeft
+        st.curEnd := st.barRight
+        st.curOpen := st.barOpen
+        st.curTop := st.barHigh
+        st.curBot := st.barLow
+        st.curStartTime := st.barTime
+        st.curCount := 1
+        st.curFromWindow := not useWindow or f_inWindow(st.barTime)
+    if newLeg and dir == 0
+        st.curDir := 0
+        st.curCount := 0
+        st.curFromWindow := false
+    if not newLeg
+        st.curEnd := st.barRight
+        st.curTop := math.max(st.curTop, st.barHigh)
+        st.curBot := math.min(st.curBot, st.barLow)
+        st.curCount += 1
+
+    if array.size(pending) > 0
+        for i = array.size(pending) - 1 to 0
+            Candidate cand = array.get(pending, i)
+            bool closedThrough = cand.dir == 1 ? st.barClose <= cand.openPrice : st.barClose >= cand.openPrice
+            bool wickThrough = cand.dir == 1 ? st.barLow <= cand.openPrice : st.barHigh >= cand.openPrice
+            bool qualified = qualifyByWick ? wickThrough : closedThrough
+            if qualified
+                cand.throughCount += 1
+            bool gateOk = not needsRetest or f_overlapsZone(gateZones, cand.dir, cand.top, cand.bot)
+            float mid = filterHalf ? f_hourMid(cand.startTime) : na
+            bool halfOk = not filterHalf or (not na(mid) and (cand.dir == -1 ? cand.top <= mid : cand.bot >= mid))
+            bool confirmNow = qualified and cand.throughCount >= 2 and not cand.drawn and gateOk and halfOk
+            bool superseded = false
+            if confirmNow and array.size(zones) > 0
+                for z = array.size(zones) - 1 to 0
+                    Mark older = array.get(zones, z)
+                    bool overlaps = older.top >= cand.bot and older.bottom <= cand.top
+                    bool sameDir = older.dir == cand.dir and overlaps
+                    if sameDir and older.startBar > cand.startBar
+                        superseded := true
+                    if sameDir and older.startBar < cand.startBar and not older.tapped
+                        f_erase(older)
+                        array.remove(zones, z)
+            bool drawNow = confirmNow and not superseded
+            if drawNow
+                if array.size(zones) >= MAX_ZONES
+                    Mark oldest = array.shift(zones)
+                    f_erase(oldest)
+                int uid = seq.n
+                seq.n := seq.n + 1
+                color paint = cand.dir == 1 ? bearPaint : bullPaint
+                box created = box.new(cand.startBar, cand.top, cand.endBar + 1, cand.bot,
+                     xloc = xloc.bar_index, extend = extend.right,
+                     border_color = paint, bgcolor = paint)
+                Mark made = Mark.new(created, cand.top, cand.bot, st.barRight, true, uid, cand.dir)
+                made.startBar := cand.startBar
+                array.push(zones, made)
+                cand.drawn := true
+                cand.zoneId := uid
+            bool failed = not closedThrough and cand.throughCount > 0
+            if qualifyByWick and wickThrough
+                failed := false
+            bool rejectHalf = filterHalf and not halfOk and cand.throughCount >= 2 and not cand.drawn
+            if failed or rejectHalf or superseded
+                if cand.drawn and array.size(zones) > 0
+                    for z = array.size(zones) - 1 to 0
+                        Mark zone = array.get(zones, z)
+                        if zone.uid == cand.zoneId and not zone.tapped
+                            bool comingBack = zone.departed and st.barHigh >= zone.bottom and st.barLow <= zone.top
+                            if not comingBack
+                                f_erase(zone)
+                                array.remove(zones, z)
+                            break
+                array.remove(pending, i)
+
+    bool bullTap = false
+    bool bearTap = false
+    int tapSide = 0
+    array<int> spared = array.new<int>()
+    if array.size(zones) > 0
+        for n = array.size(zones) - 1 to 0
+            Mark zone = array.get(zones, n)
+            if zone.live and st.barRight > zone.createdBar
+                bool retested = false
+                if needsRetest
+                    bool wasGone = zone.departed
+                    bool leftNow = zone.dir == -1 ? st.barClose > zone.top : st.barClose < zone.bottom
+                    if leftNow
+                        zone.departed := true
+                    bool cameBack = st.barHigh >= zone.bottom and st.barLow <= zone.top
+                    if wasGone and cameBack
+                        retested := true
+                if retested
+                    zone.tapped := true
+                    array.push(spared, zone.uid)
+                    if zone.dir == -1
+                        bullTap := true
+                    if zone.dir == 1
+                        bearTap := true
+                    f_freezePair(gateZones, zone, st.barRight)
+                    int side = f_drawTarget(zone, st.barTime, st.barClose, fill)
+                    if side == 1 and tapSide == -1
+                        tapSide := 2
+                    if side == 1 and tapSide == 0
+                        tapSide := 1
+                    if side == -1 and tapSide == 1
+                        tapSide := 2
+                    if side == -1 and tapSide == 0
+                        tapSide := -1
+                if zone.live
+                    if st.barHigh >= zone.top or st.barClose >= zone.top
+                        zone.hitTop := true
+                    if st.barLow <= zone.bottom or st.barClose <= zone.bottom
+                        zone.hitBot := true
+                if zone.live and zone.hitTop and zone.hitBot
+                    box.set_extend(zone.zone, extend.none)
+                    box.set_right(zone.zone, st.barRight)
+                    zone.live := false
+                    if hideMitigated
+                        f_erase(zone)
+                        array.remove(zones, n)
+    if needsRetest and bullTap
+        f_expireDir(zones, 1, spared)
+        f_expireDir(gateZones, 1, spared)
+        f_dropPending(pending, 1)
+        f_dropPending(otherPending, 1)
+    if needsRetest and bearTap
+        f_expireDir(zones, -1, spared)
+        f_expireDir(gateZones, -1, spared)
+        f_dropPending(pending, -1)
+        f_dropPending(otherPending, -1)
+    tapSide
+
+int pivotWindow = swingLength * 2 + 1
+if swingTargetOn and not na(closedTargetTime) and (lastTargetTime < 0 or closedTargetTime != lastTargetTime)
+    lastTargetTime := closedTargetTime
+    array.push(targetHighs, closedTargetHigh)
+    array.push(targetLows, closedTargetLow)
+    array.push(targetTimes, closedTargetTime)
+    if array.size(targetHighs) > pivotWindow
+        array.shift(targetHighs)
+        array.shift(targetLows)
+        array.shift(targetTimes)
+    if array.size(targetHighs) == pivotWindow
+        float pivotHigh = array.get(targetHighs, swingLength)
+        float pivotLow = array.get(targetLows, swingLength)
+        bool isHigh = true
+        bool isLow = true
+        for pivotIndex = 0 to pivotWindow - 1
+            if pivotIndex != swingLength
+                if array.get(targetHighs, pivotIndex) >= pivotHigh
+                    isHigh := false
+                if array.get(targetLows, pivotIndex) <= pivotLow
+                    isLow := false
+        int pivotTime = array.get(targetTimes, swingLength)
+        if isHigh
+            array.push(swingPrices, pivotHigh)
+            array.push(swingKinds, 1)
+            array.push(swingTimes, pivotTime)
+        if isLow
+            array.push(swingPrices, pivotLow)
+            array.push(swingKinds, -1)
+            array.push(swingTimes, pivotTime)
+        while array.size(swingPrices) > 50
+            array.shift(swingPrices)
+            array.shift(swingKinds)
+            array.shift(swingTimes)
+
+Fill fill = Fill.new()
+if barstate.isconfirmed
+    f_noteHour(time, high, low)
+if htfOk
+    f_take(htfLeg, htfIsChart, htfSeconds, htfChanged, htfOpen, htfHigh, htfLow, htfClose, htfTime)
+if htfOk and htfLeg.ready
+    f_onCandle(htfLeg, htfZones, htfPending, ids, true, false, true, htfZones, htfBull, htfBear, ltfPending, fill)
+if ltfOk
+    f_take(ltfLeg, ltfSameChart, ltfSeconds, ltfChanged, ltfOpen, ltfHigh, ltfLow, ltfClose, ltfTime)
+int ltfSide = 0
+if ltfOk and ltfLeg.ready
+    ltfSide := f_onCandle(ltfLeg, ltfZones, ltfPending, ids, false, true, false, htfZones, ltfBull, ltfBear, htfPending, fill)
+if ltfSide == 1 or ltfSide == 2
+    buySignal := true
+if ltfSide == -1 or ltfSide == 2
+    sellSignal := true
+
+// The market order fills at the close of the LTF retest. The stop and the
+// target are the prices drawn with the label. No target keeps the stop only.
+if buySignal
+    strategy.entry("15M OB Long", strategy.long, comment = "15M OB Buy")
+    if na(fill.buyTarget)
+        strategy.exit("15M OB Long Exit", from_entry = "15M OB Long", stop = fill.buyStop)
+    if not na(fill.buyTarget)
+        strategy.exit("15M OB Long Exit", from_entry = "15M OB Long", stop = fill.buyStop, limit = fill.buyTarget)
+if sellSignal
+    strategy.entry("15M OB Short", strategy.short, comment = "15M OB Sell")
+    if na(fill.sellTarget)
+        strategy.exit("15M OB Short Exit", from_entry = "15M OB Short", stop = fill.sellStop)
+    if not na(fill.sellTarget)
+        strategy.exit("15M OB Short Exit", from_entry = "15M OB Short", stop = fill.sellStop, limit = fill.sellTarget)
+
+alertcondition(buySignal, title = "15M OB Buy",
+     message = "15M OB Buy: price retested a bullish LTF order block.")
+alertcondition(sellSignal, title = "15M OB Sell",
+     message = "15M OB Sell: price retested a bearish LTF order block.")
