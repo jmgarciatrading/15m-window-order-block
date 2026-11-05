@@ -7,7 +7,12 @@
 // only after price has swept the last closed 4-hour candle and closed back
 // inside it. A swept low allows a bullish leg. A swept high allows a bearish
 // leg. That sweep stays valid until a later close goes back through its side.
-// The leg's first open has to be after the sweep. One order per New York
+// The leg's first open has to be after the sweep. The last order block of
+// the hour is the HTF block whose second close opens from :45 through :05.
+// The retest of that block is the starting wick of the following hour, from
+// :00 through :15, and that wick confirms the expansion by the LTF block.
+// The LTF block has to overlap that HTF block. Both ends are included. A
+// second close outside its span removes the candidate. One order per New York
 // day, and only at 10:05 or later. The stop has to be 15 points or closer.
 // A later signal that day does not enter and does not replace the stop or
 // target. A trade opened before 15:55 is closed at 15:55 the same day. The
@@ -81,6 +86,14 @@ bool skipSundays = input.bool(false, "Skip Sundays", group = GRP_WINDOW,
 string GRP_LIQUIDITY = "Liquidity"
 string liquidityChoice = input.string("4H", "Liquidity Timeframe", options = ["Off", "4H"], group = GRP_LIQUIDITY,
      tooltip = "A 15-minute leg qualifies only after a sweep of the last closed candle on this timeframe. Price has to trade beyond that candle and close back inside it. A swept low allows a bullish leg. A swept high allows a bearish leg. The sweep stays valid until a later close goes back through that side. The leg's first open has to be after the sweep. The two qualifying closes still come after that open. Off qualifies every leg inside the window. The default is 4H. This does not filter the LTF order block.")
+
+string GRP_CONFIRM = "Confirm Minute"
+int htfConfirmFrom = input.int(45, "HTF Confirm", minval = 0, maxval = 59, group = GRP_CONFIRM, inline = "htfc")
+int htfConfirmTo = input.int(5, "to", minval = 0, maxval = 59, group = GRP_CONFIRM, inline = "htfc",
+     tooltip = "New York minute of the HTF candle that completes the second close. Both ends are included. 45 to 5 wraps the hour, from :45 through :05. That block is the last order block of the hour. On a 15-minute chart those candles open at :45 and :00. A second close outside this span removes the candidate.")
+int ltfConfirmFrom = input.int(0, "LTF Confirm", minval = 0, maxval = 59, group = GRP_CONFIRM, inline = "ltfc")
+int ltfConfirmTo = input.int(15, "to", minval = 0, maxval = 59, group = GRP_CONFIRM, inline = "ltfc",
+     tooltip = "New York minute of the LTF candle that completes the second close. Both ends are included. 0 to 15 is the starting wick of the hour after the HTF block. The LTF block has to overlap that HTF block, and the retest that prints the order has to fall in the same wick. A second close outside this span removes the candidate.")
 
 string GRP_DISPLAY = "Display"
 bool hideMitigated = input.bool(true, "Hide mitigated", group = GRP_DISPLAY,
@@ -193,6 +206,28 @@ f_liquidityStill(int dir) =>
         allowed := bearSweepValid
     allowed
 
+f_inConfirmMinute(int t, int fromMinute, int toMinute) =>
+    int minuteOfHour = minute(t, NY_TIMEZONE)
+    bool inside = minuteOfHour >= fromMinute and minuteOfHour <= toMinute
+    if fromMinute > toMinute
+        inside := minuteOfHour >= fromMinute or minuteOfHour <= toMinute
+    inside
+
+f_inNextOpening(int confirmTime, int probe) =>
+    int minuteOf = minute(confirmTime, NY_TIMEZONE)
+    int shift = 0
+    bool boundary = false
+    if minuteOf >= 45
+        shift := 60 - minuteOf
+        boundary := true
+    if minuteOf <= 5
+        shift := -minuteOf
+        boundary := true
+    int openStart = confirmTime + shift * 60 * 1000
+    int openEnd = openStart + 15 * 60 * 1000
+    bool inside = probe >= openStart and probe <= openEnd
+    boundary and inside
+
 type Mark
     box zone
     float top
@@ -207,6 +242,8 @@ type Mark
     bool departed = false
     label signal = na
     bool tapped = false
+    int confirmTime = na
+    int anchorTime = na
 
 type Fill
     float buyStop = na
@@ -315,6 +352,17 @@ f_overlapsZone(array<Mark> zones, int dir, float top, float bot) =>
             if zone.dir == dir and overlaps
                 ok := true
     ok
+
+f_linkedConfirm(array<Mark> zones, int dir, float top, float bot, int probe) =>
+    int found = na
+    if array.size(zones) > 0
+        for n = array.size(zones) - 1 to 0
+            Mark zone = array.get(zones, n)
+            bool overlaps = zone.top >= bot and zone.bottom <= top
+            bool linked = zone.dir == dir and overlaps and not na(zone.confirmTime) and f_inNextOpening(zone.confirmTime, probe)
+            if linked and na(found)
+                found := zone.confirmTime
+    found
 
 f_take(Leg st, bool chartTf, int tfSeconds, bool changed, float sO, float sH, float sL, float sC, int sT) =>
     st.ready := false
@@ -503,6 +551,11 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
     bool bearTap = false
     int tapSide = 0
     array<int> spared = array.new<int>()
+    bool confirmMinuteOk = true
+    if useWindow
+        confirmMinuteOk := f_inConfirmMinute(st.barTime, htfConfirmFrom, htfConfirmTo)
+    if needsRetest
+        confirmMinuteOk := f_inConfirmMinute(st.barTime, ltfConfirmFrom, ltfConfirmTo)
     if array.size(pending) > 0
         for i = array.size(pending) - 1 to 0
             Candidate cand = array.get(pending, i)
@@ -519,11 +572,14 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
                     cand.retestBar := st.barRight
                     cand.retestTime := st.barTime
                     cand.retestClose := st.barClose
-            bool gateOk = not needsRetest or f_overlapsZone(gateZones, cand.dir, cand.top, cand.bot)
+            int linkedAt = na
+            if needsRetest
+                linkedAt := f_linkedConfirm(gateZones, cand.dir, cand.top, cand.bot, st.barTime)
+            bool gateOk = not needsRetest or not na(linkedAt)
             float mid = filterHalf ? f_hourMid(cand.startTime) : na
             bool halfOk = not filterHalf or (not na(mid) and (cand.dir == -1 ? cand.top <= mid : cand.bot >= mid))
             bool liquidityStill = not useWindow or f_liquidityStill(cand.dir)
-            bool confirmNow = qualified and cand.throughCount >= 2 and not cand.drawn and gateOk and halfOk and liquidityStill
+            bool confirmNow = qualified and cand.throughCount >= 2 and not cand.drawn and gateOk and halfOk and liquidityStill and confirmMinuteOk
             bool superseded = false
             if confirmNow and array.size(zones) > 0
                 for z = array.size(zones) - 1 to 0
@@ -548,25 +604,41 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
                      border_color = paint, bgcolor = paint)
                 Mark made = Mark.new(created, cand.top, cand.bot, st.barRight, true, uid, cand.dir)
                 made.startBar := cand.startBar
+                made.confirmTime := st.barTime
+                if needsRetest
+                    made.anchorTime := linkedAt
                 array.push(zones, made)
                 cand.drawn := true
                 cand.zoneId := uid
-                if needsRetest and cand.retestBar >= 0
+                bool storedInWick = cand.retestBar >= 0 and not na(linkedAt) and f_inNextOpening(linkedAt, cand.retestTime)
+                bool tradedNow = st.barHigh >= cand.bot and st.barLow <= cand.top
+                bool nowInWick = not na(linkedAt) and f_inNextOpening(linkedAt, st.barTime) and tradedNow and cand.armedBar >= 0 and st.barRight > cand.armedBar
+                int signalBar = cand.retestBar
+                int signalTime = cand.retestTime
+                float signalClose = cand.retestClose
+                bool signalWick = storedInWick
+                if needsRetest and not signalWick and nowInWick
+                    signalWick := true
+                    signalBar := st.barRight
+                    signalTime := st.barTime
+                    signalClose := st.barClose
+                if needsRetest and signalWick
                     made.tapped := true
                     array.push(spared, uid)
                     if cand.dir == -1
                         bullTap := true
                     if cand.dir == 1
                         bearTap := true
-                    f_freezePair(gateZones, made, cand.retestBar)
-                    int side = f_drawTarget(made, cand.retestTime, cand.retestClose, fill)
+                    f_freezePair(gateZones, made, signalBar)
+                    int side = f_drawTarget(made, signalTime, signalClose, fill)
                     tapSide := f_foldTap(tapSide, side)
             bool failed = not closedThrough and cand.throughCount > 0
             if qualifyByWick and wickThrough
                 failed := false
             bool rejectHalf = filterHalf and not halfOk and cand.throughCount >= 2 and not cand.drawn
             bool rejectLiquidity = useWindow and not liquidityStill and cand.throughCount >= 2 and not cand.drawn
-            if failed or rejectHalf or rejectLiquidity or superseded
+            bool rejectMinute = not confirmMinuteOk and cand.throughCount >= 2 and not cand.drawn
+            if failed or rejectHalf or rejectLiquidity or rejectMinute or superseded
                 if cand.drawn and array.size(zones) > 0
                     for z = array.size(zones) - 1 to 0
                         Mark zone = array.get(zones, z)
@@ -588,7 +660,8 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
                     if leftNow
                         zone.departed := true
                     bool cameBack = st.barHigh >= zone.bottom and st.barLow <= zone.top
-                    if cameBack
+                    bool inWick = not na(zone.anchorTime) and f_inNextOpening(zone.anchorTime, st.barTime)
+                    if cameBack and inWick
                         retested := true
                 if retested
                     zone.tapped := true

@@ -2,10 +2,13 @@
 
 The fitted sample is replayed per outright while that outright is the daily
 volume leader. A 15-minute leg qualifies only after a same-direction sweep of
-the last closed 4-hour candle. Buckets are anchored to the Pyne session: Sunday
-18:00 New York, and midnight New York on Monday through Friday. A stop or target
-that trades fills on the one-minute path. The open walks to the nearer extreme
-first, and an equal distance walks to the high first. One MES point is 5 dollars.
+the last closed 4-hour candle. The last block of an hour confirms from :45
+through :05. Its retest is the next hour's opening wick, :00 through :15, and
+the lower-timeframe block that overlaps it confirms the expansion there.
+Buckets are anchored to the Pyne session: Sunday 18:00 New York, and midnight
+New York on Monday through Friday. A stop or target that trades fills on the
+one-minute path. The open walks to the nearer extreme first, and an equal
+distance walks to the high first. One MES point is 5 dollars.
 """
 
 from __future__ import annotations
@@ -76,6 +79,8 @@ class Zone:
     hit_bot: bool = False
     departed: bool = False
     tapped: bool = False
+    confirm_time: datetime | None = None
+    anchor_time: datetime | None = None
 
 
 @dataclass
@@ -138,6 +143,34 @@ def bucket_start(ny: datetime, minutes: int) -> datetime | None:
 def in_window(ny: datetime) -> bool:
     minute_of_day = ny.hour * 60 + ny.minute
     return 9 * 60 + 30 <= minute_of_day < 16 * 60
+
+
+def in_confirm_minute(ny: datetime, start: int, end: int) -> bool:
+    minute_of_hour = ny.minute
+    if start > end:
+        return minute_of_hour >= start or minute_of_hour <= end
+    return start <= minute_of_hour <= end
+
+
+def in_next_opening(confirm_time: datetime, probe: datetime) -> bool:
+    minute_of_hour = confirm_time.minute
+    if minute_of_hour >= 45:
+        shift = 60 - minute_of_hour
+    elif minute_of_hour <= 5:
+        shift = -minute_of_hour
+    else:
+        return False
+    open_start = confirm_time + timedelta(minutes=shift)
+    open_end = open_start + timedelta(minutes=15)
+    return open_start <= probe <= open_end
+
+
+def linked_confirm(zones: list[Zone], direction: int, top: float, bot: float, probe: datetime) -> datetime | None:
+    for zone in reversed(zones):
+        overlaps = zone.top >= bot and zone.bottom <= top
+        if zone.dir == direction and overlaps and zone.confirm_time is not None and in_next_opening(zone.confirm_time, probe):
+            return zone.confirm_time
+    return None
 
 
 def day_key(ny: datetime) -> int:
@@ -384,11 +417,18 @@ class Book:
                     cand.retest_bar = candle.right
                     cand.retest_time = candle.t
                     cand.retest_close = candle.c
-            gate_ok = (not needs_retest) or self._overlaps(gate, cand.dir, cand.top, cand.bot)
+            linked = linked_confirm(gate, cand.dir, cand.top, cand.bot, candle.t) if needs_retest else None
+            gate_ok = (not needs_retest) or linked is not None
             mid = self.hour_mid(cand.start_time) if filter_half and cand.start_time is not None else None
             half_ok = (not filter_half) or (mid is not None and ((cand.top <= mid) if cand.dir == -1 else (cand.bot >= mid)))
             liquidity_still = (not use_window) or self.still(cand.dir)
-            confirm_now = qualified and cand.through_count >= 2 and (not cand.drawn) and gate_ok and half_ok and liquidity_still
+            if use_window:
+                confirm_minute_ok = in_confirm_minute(candle.t, 45, 5)
+            elif needs_retest:
+                confirm_minute_ok = in_confirm_minute(candle.t, 0, 15)
+            else:
+                confirm_minute_ok = True
+            confirm_now = qualified and cand.through_count >= 2 and (not cand.drawn) and gate_ok and half_ok and liquidity_still and confirm_minute_ok
             superseded = False
             if confirm_now:
                 kept_zones: list[Zone] = []
@@ -406,24 +446,53 @@ class Book:
                     zones.pop(0)
                 uid = self.seq
                 self.seq += 1
-                made = Zone(cand.top, cand.bot, candle.right, True, uid, cand.dir, cand.start)
+                made = Zone(cand.top, cand.bot, candle.right, True, uid, cand.dir, cand.start, confirm_time=candle.t)
+                if needs_retest:
+                    made.anchor_time = linked
                 zones.append(made)
                 cand.drawn = True
                 cand.zone_id = uid
-                if needs_retest and cand.retest_bar >= 0 and cand.retest_close is not None and cand.retest_time is not None:
+                stored_in_wick = (
+                    needs_retest
+                    and linked is not None
+                    and cand.retest_bar >= 0
+                    and cand.retest_time is not None
+                    and cand.retest_close is not None
+                    and in_next_opening(linked, cand.retest_time)
+                )
+                traded_now = candle.h >= cand.bot and candle.l <= cand.top
+                now_in_wick = (
+                    needs_retest
+                    and linked is not None
+                    and in_next_opening(linked, candle.t)
+                    and traded_now
+                    and cand.armed_bar >= 0
+                    and candle.right > cand.armed_bar
+                )
+                signal_time = cand.retest_time
+                signal_close = cand.retest_close
+                signal_bar = cand.retest_bar
+                signal_wick = stored_in_wick
+                if needs_retest and (not signal_wick) and now_in_wick:
+                    signal_wick = True
+                    signal_time = candle.t
+                    signal_close = candle.c
+                    signal_bar = candle.right
+                if signal_wick and signal_close is not None and signal_time is not None:
                     made.tapped = True
                     spared.add(uid)
                     if cand.dir == -1:
                         bull_tap = True
                     if cand.dir == 1:
                         bear_tap = True
-                    self._freeze(gate, made, cand.retest_bar)
-                    side = self._target(made, cand.retest_close)
+                    self._freeze(gate, made, signal_bar)
+                    side = self._target(made, signal_close)
                     tap_side = self._fold(tap_side, side)
             failed = (not closed_through) and cand.through_count > 0
             reject_half = filter_half and (not half_ok) and cand.through_count >= 2 and (not cand.drawn)
             reject_liquidity = use_window and (not liquidity_still) and cand.through_count >= 2 and (not cand.drawn)
-            drop = failed or reject_half or reject_liquidity or superseded
+            reject_minute = (not confirm_minute_ok) and cand.through_count >= 2 and (not cand.drawn)
+            drop = failed or reject_half or reject_liquidity or reject_minute or superseded
             if drop:
                 if cand.drawn:
                     zones[:] = [
@@ -443,7 +512,8 @@ class Book:
                     left_now = candle.c > zone.top if zone.dir == -1 else candle.c < zone.bottom
                     if left_now:
                         zone.departed = True
-                    if candle.h >= zone.bottom and candle.l <= zone.top:
+                    in_wick = zone.anchor_time is not None and in_next_opening(zone.anchor_time, candle.t)
+                    if candle.h >= zone.bottom and candle.l <= zone.top and in_wick:
                         retested = True
                 if retested:
                     zone.tapped = True
