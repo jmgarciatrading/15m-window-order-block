@@ -40,7 +40,9 @@ strategy("15M Window Order Block Strategy", shorttitle = "15M OB St", overlay = 
 // label is placed on that candle when the block appears. That retest stops
 // the LTF block and the HTF block it overlaps. The stop is the far side of that
 // LTF block. The target is the newest swing beyond the retest close, and two
-// times that stop distance when no swing is there. BUY is a bullish retest
+// times that stop distance when no swing is there. A swing farther than Max
+// Target times the stop is drawn at that multiple. The default multiple is 2.
+// A closer swing stays. BUY is a bullish retest
 // and SELL is a bearish retest. The label is removed when its block is
 // removed. That tap expires every zone in the opposite direction, and its
 // label with it. A target closer than the stop leaves the signal off. A block
@@ -72,8 +74,8 @@ bool qualifyByWick = qualifyBy == "High/Low"
 string GRP_TARGET = "Target"
 string targetChoice = input.string("15M", "Timeframe Target", options = ["Off", "1M", "5M", "15M", "1H", "4H"], group = GRP_TARGET,
      tooltip = "Take profit is the newest confirmed swing on this timeframe beyond the LTF retest close. A bullish block uses a swing high above that close. A bearish block uses a swing low below it. A wick through the swing does not skip it. It has to be this chart or higher. A lower choice is ignored. When no swing is beyond the close, the target is two times the distance from that close to the far side of the LTF block. Off does not use a swing. Max Target then sets the target, and 0 leaves it empty. A target closer than the stop is left off. Equal to that distance still draws.")
-int maxTarget = input.int(0, "Max Target", minval = 0, maxval = 50, group = GRP_TARGET,
-     tooltip = "When Timeframe Target is Off, the target is this multiple of the stop distance. 3 draws it at 1:3, and 0 leaves the target empty. When a swing timeframe is selected, this caps a swing farther than this multiple. A closer swing stays. 0 leaves that swing unchanged. The two-times fallback stays at two times.")
+int maxTarget = input.int(2, "Max Target", minval = 0, maxval = 50, group = GRP_TARGET,
+     tooltip = "When Timeframe Target is Off, the target is this multiple of the stop distance. 3 draws it at 1:3, and 0 leaves the target empty. When a swing timeframe is selected, this caps a swing farther than this multiple. A closer swing stays. 0 leaves that swing unchanged. The two-times fallback stays at two times. The default is 2.")
 int swingLength = input.int(2, "Target Swing Length", minval = 1, maxval = 20, group = GRP_TARGET,
      tooltip = "Bars required on each side of a target-timeframe pivot. The pivot is usable only after that many later candles have closed.")
 
