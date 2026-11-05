@@ -1,0 +1,56 @@
+Strategy commit: 48cb9a9ad35acec937066f093f76bf7e0eb233b0
+
+Stage 1. PyneCore run of 15M Window Order Block Strategy on the fitted sample,
+1 May 2026 through 30 October 2026. One MES contract, $5 per point, no commission.
+Each outright is replayed only while it is the daily volume leader.
+MESM6 is 1 May through 12 June. MESU6 is 14 June through 13 September.
+MESZ6 is 14 September through 30 October. Times are New York.
+
+Parameters
+HTF OB: 15
+LTF OB: empty, so the 1-minute chart
+Window: 9:30 until 16:00 New York. 16:00 is not included.
+Minute window: 0 to 60
+Skip Sundays: off
+Liquidity Timeframe: 4H
+HTF Confirm: 45 to 5, both ends included. This wraps the hour.
+LTF Confirm: 0 to 15, both ends included.
+Qualify by: Close
+Timeframe Target: 15M
+Target Swing Length: 2
+Max Target: 2
+Order From: 10:05 New York
+Max Stop: 15 points
+One order per New York day.
+Flat At 15:55: on
+
+The higher-timeframe block is the last block of the hour. Its confirming
+candle opens from :45 through :05. The lower-timeframe block has to overlap
+that block and confirm in the following hour's opening, from :00 through :15.
+The retest that prints the order has to fall in that same wick. The 4-hour
+sweep, premium and discount, and the session rules are unchanged. The
+indicator file is unchanged.
+
+Fitted sample
+Trades                          0
+Net                             0.00
+Profit factor                   0.000
+Drawdown                        0.00
+Worst loss                      0.00
+Without the best trade          0.00
+First half / second half        0.00 / 0.00
+Trades of 80 points or more     0
+
+No order was placed. Profit factor is 0 because there is no gross profit and
+no gross loss. Equity drawdown is 0 on MESM6, MESU6, and MESZ6. Each segment
+ended with no open trade.
+
+The lab reading of the same rules drew 17 higher-timeframe blocks in that
+window, 12 confirmed at :45 and 5 at :00. Three lower-timeframe blocks
+confirmed and were retested inside the following opening: 29 June 15:07 long,
+24 August 16:00 short, and 25 September 16:03 long. On each one the 15-minute
+swing target was closer than the stop, so the order stayed off. Stops were
+2.75, 5.25, and 3.00 points.
+
+The 4-hour sweep book without this wick is strategy-runs/pynecore/2026-11-05-7.txt,
+net -61.25 on 22 trades. PyneCore is not a TradingView compile.
