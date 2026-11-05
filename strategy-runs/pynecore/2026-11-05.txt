@@ -1,0 +1,27 @@
+PyneCore run of 15M Window Order Block on a 90-bar 1-minute fixture shaped like the Nov 5 MES chart. The six-month lab file ends 2026-10-30, so this session is not in it.
+
+Parameters
+HTF OB: 15
+LTF OB: empty (1-minute chart)
+Window: 9:00 through 11:45 New York, so the 11:30 leg is included
+Qualify by: Close
+Timeframe Target: Off
+Max Target: 0
+Show buy/sell signals: on
+
+Fixture
+2026-11-05 11:00 through 12:29 America/New_York.
+The tight bearish leg is 11:36-11:38, from 7493 to 7504.
+11:39 is the first close through 7493 and overlaps the leg. It is not the signal.
+11:40 wicks back to 7493 and is also the second qualifying close.
+Price then leaves and does not return. The 15-minute block is not drawn until 12:15.
+
+Result
+One SELL label at 11:40, y 7504, tooltip Stop 7504.
+LTF box top 7504 bottom 7493, left bar 36, right bar 40, extend none.
+HTF box top 7504 bottom 7460, left bar 30, right bar 40, extend none.
+No second label.
+
+The strategy run on the same bars drew the same SELL and the same stopped boxes. Its short filled at 12:15, the bar the 15-minute block appeared, at 7424, and was still open at the last bar.
+
+PyneComp strict compile of both Pine files succeeded. PyneCore is not a TradingView compile.
