@@ -5,6 +5,8 @@ volume leader. A 15-minute leg qualifies only after a same-direction sweep of
 the last closed 4-hour candle. The last block of an hour confirms from :45
 through :05. Its retest is the next hour's opening wick, :00 through :15, and
 the lower-timeframe block that overlaps it confirms the expansion there.
+The order is taken only while that higher-timeframe block is still in the book
+and the signal candle trades it. A deleted block does not leave an entry.
 Buckets are anchored to the Pyne session: Sunday 18:00 New York, and midnight
 New York on Monday through Friday. A stop or target that trades fills on the
 one-minute path. The open walks to the nearer extreme first, and an equal
@@ -64,6 +66,8 @@ class Candidate:
     retest_bar: int = -1
     retest_time: datetime | None = None
     retest_close: float | None = None
+    retest_high: float | None = None
+    retest_low: float | None = None
 
 
 @dataclass
@@ -169,6 +173,17 @@ def linked_confirm(zones: list[Zone], direction: int, top: float, bot: float, pr
     for zone in reversed(zones):
         overlaps = zone.top >= bot and zone.bottom <= top
         if zone.dir == direction and overlaps and zone.confirm_time is not None and in_next_opening(zone.confirm_time, probe):
+            return zone.confirm_time
+    return None
+
+
+def linked_retest(zones: list[Zone], direction: int, top: float, bot: float, probe: datetime | None, bar_high: float | None, bar_low: float | None) -> datetime | None:
+    if probe is None or bar_high is None or bar_low is None:
+        return None
+    for zone in reversed(zones):
+        overlaps = zone.top >= bot and zone.bottom <= top
+        traded = bar_high >= zone.bottom and bar_low <= zone.top
+        if zone.dir == direction and overlaps and traded and zone.confirm_time is not None and in_next_opening(zone.confirm_time, probe):
             return zone.confirm_time
     return None
 
@@ -417,6 +432,8 @@ class Book:
                     cand.retest_bar = candle.right
                     cand.retest_time = candle.t
                     cand.retest_close = candle.c
+                    cand.retest_high = candle.h
+                    cand.retest_low = candle.l
             linked = linked_confirm(gate, cand.dir, cand.top, cand.bot, candle.t) if needs_retest else None
             gate_ok = (not needs_retest) or linked is not None
             mid = self.hour_mid(cand.start_time) if filter_half and cand.start_time is not None else None
@@ -452,28 +469,16 @@ class Book:
                 zones.append(made)
                 cand.drawn = True
                 cand.zone_id = uid
-                stored_in_wick = (
-                    needs_retest
-                    and linked is not None
-                    and cand.retest_bar >= 0
-                    and cand.retest_time is not None
-                    and cand.retest_close is not None
-                    and in_next_opening(linked, cand.retest_time)
-                )
+                stored_link = linked_retest(gate, cand.dir, cand.top, cand.bot, cand.retest_time, cand.retest_high, cand.retest_low) if cand.retest_bar >= 0 else None
                 traded_now = candle.h >= cand.bot and candle.l <= cand.top
-                now_in_wick = (
-                    needs_retest
-                    and linked is not None
-                    and in_next_opening(linked, candle.t)
-                    and traded_now
-                    and cand.armed_bar >= 0
-                    and candle.right > cand.armed_bar
-                )
+                now_link = None
+                if needs_retest and traded_now and cand.armed_bar >= 0 and candle.right > cand.armed_bar:
+                    now_link = linked_retest(gate, cand.dir, cand.top, cand.bot, candle.t, candle.h, candle.l)
                 signal_time = cand.retest_time
                 signal_close = cand.retest_close
                 signal_bar = cand.retest_bar
-                signal_wick = stored_in_wick
-                if needs_retest and (not signal_wick) and now_in_wick:
+                signal_wick = stored_link is not None
+                if needs_retest and (not signal_wick) and now_link is not None:
                     signal_wick = True
                     signal_time = candle.t
                     signal_close = candle.c
@@ -512,8 +517,9 @@ class Book:
                     left_now = candle.c > zone.top if zone.dir == -1 else candle.c < zone.bottom
                     if left_now:
                         zone.departed = True
-                    in_wick = zone.anchor_time is not None and in_next_opening(zone.anchor_time, candle.t)
-                    if candle.h >= zone.bottom and candle.l <= zone.top and in_wick:
+                    came_back = candle.h >= zone.bottom and candle.l <= zone.top
+                    still_link = linked_retest(gate, zone.dir, zone.top, zone.bottom, candle.t, candle.h, candle.l)
+                    if came_back and still_link is not None:
                         retested = True
                 if retested:
                     zone.tapped = True
@@ -560,6 +566,7 @@ class Book:
             overlaps = higher.top >= zone.bottom and higher.bottom <= zone.top
             if higher.dir == zone.dir and overlaps:
                 higher.live = False
+                higher.tapped = True
 
     def _fold(self, tap_side: int, side: int) -> int:
         if side == 1 and tap_side == -1:
