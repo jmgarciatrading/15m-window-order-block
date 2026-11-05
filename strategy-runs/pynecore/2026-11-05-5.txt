@@ -1,0 +1,36 @@
+Strategy commit: 0c946221890595ee9c5e0c70f83b185a4e1e0d81
+Same orders as that commit. This run changes only the block timeframes.
+
+PyneCore run of 15M Window Order Block Strategy on the lab MES file,
+1 May 2026 through 30 October 2026. One MES contract, $5 per point, no commission.
+Each outright is replayed only while it is the daily volume leader.
+MESM6 is 1 May through 12 June. MESU6 is 14 June through 13 September.
+MESZ6 is 14 September through 30 October. Times are New York.
+
+Parameters
+HTF OB: 5
+LTF OB: 1
+Window: 9:00 through 9:45 New York
+Qualify by: Close
+Timeframe Target: 15M
+Target Swing Length: 2
+Max Target: 2
+Order From: 9:30 New York
+Max Stop: 15 points
+One order per New York day.
+
+Six months, closed trades chained in time.
+45 trades, 13 wins, 28 losses, 4 flat.
+Net -172.50. Gross profit 597.50, gross loss 770, profit factor 0.78.
+Closed-trade drawdown 398.75.
+May through August is -233.75 on 27 trades. September and October are +61.25 on 18 trades.
+
+MESM6 net -48.75, equity drawdown 153.75, 12 trades.
+MESU6 net -202.50, equity drawdown 302.50, 20 trades.
+MESZ6 net +78.75, equity drawdown 82.50, 13 trades.
+
+Monthly closed-trade net:
+May +30. June -11.25. July -92.50. August -160. September -18.75. October +80.
+
+The 15-minute HTF book on this commit is strategy-runs/pynecore/2026-11-05-4.txt, net +281.25 on 21 trades.
+PyneCore is not a TradingView compile. The Pine defaults were not changed.
