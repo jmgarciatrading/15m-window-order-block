@@ -1,0 +1,61 @@
+Strategy commit: 2e6cc93fff66e1ed59456f9e03273177cdbadef0
+Cap a strategy swing target farther than twice the stop.
+
+PyneCore run of 15M Window Order Block Strategy on the lab MES file,
+1 May 2026 through 30 October 2026. One MES contract, $5 per point, no commission.
+Each outright is replayed only while it is the daily volume leader.
+MESM6 is 1 May through 12 June, 42420 bars.
+MESU6 is 14 June through 13 September, 89100 bars.
+MESZ6 is 14 September through 30 October, 48180 bars.
+Times are New York. The 13 June file date has no leader.
+
+Parameters
+HTF OB: 15
+LTF OB: empty (1-minute chart)
+Window: 9:00 through 9:45 New York
+Qualify by: Close
+Timeframe Target: 15M
+Target Swing Length: 2
+Max Target: 2
+Show buy/sell signals: on
+
+Front-month segments, from the PyneCore strategy report.
+Drawdown there is max equity drawdown.
+
+MESM6. 22 trades, 5 wins, 15 losses, 2 flat.
+Net -206.25. Gross profit 120, gross loss 326.25, profit factor 0.37.
+Equity drawdown 260. Longs -67.50 from 5 trades. Shorts -138.75 from 17.
+
+MESU6. 18 trades, 5 wins, 12 losses, 1 flat.
+Net -158.75. Gross profit 138.75, gross loss 297.50, profit factor 0.47.
+Equity drawdown 177.50. Longs -86.25 from 11 trades. Shorts -72.50 from 7.
+
+MESZ6. 15 trades, 7 wins, 8 losses.
+Net +276.25. Gross profit 392.50, gross loss 116.25, profit factor 3.38.
+Equity drawdown 75. Longs +77.50 from 4 trades. Shorts +198.75 from 11.
+These are the September and October trades from 2026-11-05-2.txt, unchanged.
+
+Six months, closed trades chained in time.
+Net -88.75. Gross profit 651.25, gross loss 740, profit factor 0.88.
+55 trades, 17 wins, 35 losses, 3 flat. Closed-trade drawdown 365.
+The book is -365 at the end of August and finishes at -88.75.
+May through August is -365 on 40 trades, profit factor 0.41.
+September and October are +276.25 on 15 trades, profit factor 3.38.
+
+Monthly closed-trade results. Drawdown in this list starts again each month.
+
+May. Net -106.25. Profit factor 0.19. Closed-trade drawdown 106.25.
+8 trades, 1 win, 6 losses, 1 flat.
+June. Net -171.25. Profit factor 0.40. Closed-trade drawdown 190.
+17 trades, 5 wins, 11 losses, 1 flat.
+July. Net -6.25. Profit factor 0.90. Closed-trade drawdown 46.25.
+6 trades, 1 win, 4 losses, 1 flat.
+August. Net -81.25. Profit factor 0.43. Closed-trade drawdown 103.75.
+9 trades, 3 wins, 6 losses.
+September. Net +108.75. Profit factor 6.12. Closed-trade drawdown 21.25.
+5 trades, 3 wins, 2 losses.
+October. Net +167.50. Profit factor 2.76. Closed-trade drawdown 61.25.
+10 trades, 4 wins, 6 losses.
+
+PyneComp was not run again. The compiled script is the one from commit 2e6cc93.
+PyneCore is not a TradingView compile.
