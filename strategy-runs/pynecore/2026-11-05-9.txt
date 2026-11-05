@@ -1,0 +1,56 @@
+Strategy commit: 48cb9a9ad35acec937066f093f76bf7e0eb233b0
+
+Stage 1. PyneCore run of 15M Window Order Block Strategy on the fitted sample,
+1 May 2026 through 30 October 2026. One MES contract, $5 per point, no commission.
+Each outright is replayed only while it is the daily volume leader.
+MESM6 is 1 May through 12 June. MESU6 is 14 June through 13 September.
+MESZ6 is 14 September through 30 October. Times are New York.
+Liquidity Timeframe is Off for this run. The strategy default remains 4H.
+
+Parameters
+HTF OB: 15
+LTF OB: empty, so the 1-minute chart
+Window: 9:30 until 16:00 New York. 16:00 is not included.
+Minute window: 0 to 60
+Skip Sundays: off
+Liquidity Timeframe: Off
+HTF Confirm: 45 to 5, both ends included. This wraps the hour.
+LTF Confirm: 0 to 15, both ends included.
+Qualify by: Close
+Timeframe Target: 15M
+Target Swing Length: 2
+Max Target: 2
+Order From: 10:05 New York
+Max Stop: 15 points
+One order per New York day.
+Flat At 15:55: on
+
+The higher-timeframe block is the last block of the hour. Its confirming
+candle opens from :45 through :05. The lower-timeframe block has to overlap
+that block and confirm in the following hour's opening, from :00 through :15.
+The retest that prints the order has to fall in that same wick. The 4-hour
+sweep is off. Premium and discount, and the session rules, stay. The
+indicator file is unchanged.
+
+Fitted sample
+Trades                          2
+Net                             51.25
+Profit factor                   4.727
+Drawdown                        22.50
+Worst loss                      -13.75
+Without the best trade          -13.75
+First half / second half        65.00 / -13.75
+Trades of 80 points or more     0
+
+1 win, 1 loss. Gross profit 65.00, gross loss 13.75.
+The drawdown is PyneCore's equity drawdown on MESM6. The June long was
+22.50 under water before it closed. The chained closed-trade drop is 13.75,
+from 65.00 to 51.25. The best trade is the 9 June long, 65.00, 13 points.
+First half is entries before 1 August 2026.
+
+9 June 2026 14:10 to 14:19 long, +65.00, 13.00 points. MESM6.
+9 September 2026 13:11 to 13:38 long, -13.75, -2.75 points. MESU6.
+MESZ6 placed no trade. Both segments ended flat.
+
+The same window with the 4-hour sweep on is strategy-runs/pynecore/2026-11-05-8.txt,
+0 trades. PyneCore is not a TradingView compile.
