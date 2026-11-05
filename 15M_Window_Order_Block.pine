@@ -22,9 +22,12 @@ indicator("15M Window Order Block", shorttitle = "15M OB", overlay = true,
 // and it is drawn once that box exists. A later overlapping leg replaces an
 // earlier one that has not been retested. When this chart is the HTF, or the
 // LTF choice is below this chart, or it is not below the HTF, only the HTF
-// blocks are shown. Both boxes extend right until price closes beyond the LTF
-// block and a later LTF candle trades back into it. That retest stops the
-// LTF block and the HTF block it overlaps. The stop is the far side of that
+// blocks are shown. The first later close through the open starts the retest
+// clock and does not print the signal. The next LTF candle that trades the
+// block does, including when that candle is the second qualifying close.
+// That touch counts when it happens before the HTF box is drawn, and the
+// label is placed on that candle when the block appears. That retest stops
+// the LTF block and the HTF block it overlaps. The stop is the far side of that
 // LTF block. The target is the newest swing beyond the retest close, and two
 // times that stop distance when no swing is there. BUY is a bullish retest
 // and SELL is a bearish retest. The label is removed when its block is
@@ -37,7 +40,7 @@ string GRP_TF = "Timeframe"
 string htfChoice = input.timeframe("15", "HTF OB", group = GRP_TF,
      tooltip = "Higher timeframe of the window order block. 5 is 5 minutes. 5 works on a 1-minute chart. 60 works on a 15-minute chart. A choice below this chart is ignored and nothing is drawn.")
 string ltfChoice = input.timeframe("", "LTF OB", group = GRP_TF,
-     tooltip = "Lower timeframe order block. Empty uses this chart. The latest leg that overlaps a valid HTF box is kept, even if that leg finished before the HTF box was confirmed. Premium and discount do not filter it. Once price closes beyond it, the next LTF candle that trades back into it stops this block and the HTF block. When this chart is the HTF, or this choice is below the chart, or it is not below the HTF, only the HTF blocks are shown.")
+     tooltip = "Lower timeframe order block. Empty uses this chart. The latest leg that overlaps a valid HTF box is kept, even if that leg finished before the HTF box was confirmed. Premium and discount do not filter it. The first close through the open does not stop it. The next LTF candle that trades it stops this block and the HTF block, including the second qualifying close and a touch that happens before the HTF box is drawn. When this chart is the HTF, or this choice is below the chart, or it is not below the HTF, only the HTF blocks are shown.")
 
 string GRP_WINDOW = "New York Window"
 int startHour = input.int(9, "From", minval = 0, maxval = 23, group = GRP_WINDOW, inline = "from")
@@ -141,6 +144,10 @@ type Candidate
     int throughCount
     bool drawn = false
     int zoneId = -1
+    int armedBar = -1
+    int retestBar = -1
+    int retestTime = 0
+    float retestClose = na
 
 type Leg
     int curDir = 0
@@ -361,6 +368,18 @@ f_freezePair(array<Mark> gateZones, Mark zone, int right) =>
             if higher.dir == zone.dir and overlaps
                 f_stopExtend(higher, right)
 
+f_foldTap(int tapSide, int side) =>
+    int next = tapSide
+    if side == 1 and tapSide == -1
+        next := 2
+    if side == 1 and tapSide == 0
+        next := 1
+    if side == -1 and tapSide == 1
+        next := 2
+    if side == -1 and tapSide == 0
+        next := -1
+    next
+
 f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool useWindow, bool needsRetest, bool filterHalf, array<Mark> gateZones, color bullPaint, color bearPaint, array<Candidate> otherPending) =>
     int dir = st.barClose > st.barOpen ? 1 : st.barClose < st.barOpen ? -1 : 0
     bool legEnded = st.curCount > 0 and (dir == 0 or dir != st.curDir)
@@ -393,6 +412,10 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
         st.curBot := math.min(st.curBot, st.barLow)
         st.curCount += 1
 
+    bool bullTap = false
+    bool bearTap = false
+    int tapSide = 0
+    array<int> spared = array.new<int>()
     if array.size(pending) > 0
         for i = array.size(pending) - 1 to 0
             Candidate cand = array.get(pending, i)
@@ -401,6 +424,14 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
             bool qualified = qualifyByWick ? wickThrough : closedThrough
             if qualified
                 cand.throughCount += 1
+            if needsRetest and cand.throughCount >= 1 and cand.armedBar < 0
+                cand.armedBar := st.barRight
+            if needsRetest and not cand.drawn and cand.armedBar >= 0 and st.barRight > cand.armedBar and cand.retestBar < 0
+                bool traded = st.barHigh >= cand.bot and st.barLow <= cand.top
+                if traded
+                    cand.retestBar := st.barRight
+                    cand.retestTime := st.barTime
+                    cand.retestClose := st.barClose
             bool gateOk = not needsRetest or f_overlapsZone(gateZones, cand.dir, cand.top, cand.bot)
             float mid = filterHalf ? f_hourMid(cand.startTime) : na
             bool halfOk = not filterHalf or (not na(mid) and (cand.dir == -1 ? cand.top <= mid : cand.bot >= mid))
@@ -432,6 +463,16 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
                 array.push(zones, made)
                 cand.drawn := true
                 cand.zoneId := uid
+                if needsRetest and cand.retestBar >= 0
+                    made.tapped := true
+                    array.push(spared, uid)
+                    if cand.dir == -1
+                        bullTap := true
+                    if cand.dir == 1
+                        bearTap := true
+                    f_freezePair(gateZones, made, cand.retestBar)
+                    int side = f_drawTarget(made, cand.retestTime, cand.retestClose)
+                    tapSide := f_foldTap(tapSide, side)
             bool failed = not closedThrough and cand.throughCount > 0
             if qualifyByWick and wickThrough
                 failed := false
@@ -448,22 +489,17 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
                             break
                 array.remove(pending, i)
 
-    bool bullTap = false
-    bool bearTap = false
-    int tapSide = 0
-    array<int> spared = array.new<int>()
     if array.size(zones) > 0
         for n = array.size(zones) - 1 to 0
             Mark zone = array.get(zones, n)
             if zone.live and st.barRight > zone.createdBar
                 bool retested = false
                 if needsRetest
-                    bool wasGone = zone.departed
                     bool leftNow = zone.dir == -1 ? st.barClose > zone.top : st.barClose < zone.bottom
                     if leftNow
                         zone.departed := true
                     bool cameBack = st.barHigh >= zone.bottom and st.barLow <= zone.top
-                    if wasGone and cameBack
+                    if cameBack
                         retested := true
                 if retested
                     zone.tapped := true
@@ -474,14 +510,7 @@ f_onCandle(Leg st, array<Mark> zones, array<Candidate> pending, Seq seq, bool us
                         bearTap := true
                     f_freezePair(gateZones, zone, st.barRight)
                     int side = f_drawTarget(zone, st.barTime, st.barClose)
-                    if side == 1 and tapSide == -1
-                        tapSide := 2
-                    if side == 1 and tapSide == 0
-                        tapSide := 1
-                    if side == -1 and tapSide == 1
-                        tapSide := 2
-                    if side == -1 and tapSide == 0
-                        tapSide := -1
+                    tapSide := f_foldTap(tapSide, side)
                 if zone.live
                     if st.barHigh >= zone.top or st.barClose >= zone.top
                         zone.hitTop := true
