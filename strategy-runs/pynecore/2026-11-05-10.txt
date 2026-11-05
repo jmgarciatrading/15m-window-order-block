@@ -1,0 +1,63 @@
+Strategy commit: fc397195dd89dc559e56bcefc0f1cb49e1920016
+
+Stage 1. PyneCore run of 15M Window Order Block Strategy on the fitted sample,
+1 May 2026 through 30 October 2026. One MES contract, $5 per point, no commission.
+Each outright is replayed only while it is the daily volume leader.
+MESM6 is 1 May through 12 June. MESU6 is 14 June through 13 September.
+MESZ6 is 14 September through 30 October. Times are New York.
+Liquidity Timeframe stays 4H. This is not the liquidity-off book.
+
+Parameters
+HTF OB: 15
+LTF OB: empty, so the 1-minute chart
+Window: 9:30 until 16:00 New York. 16:00 is not included.
+Minute window: 0 to 60
+Skip Sundays: off
+Liquidity Timeframe: 4H
+HTF Confirm: 45 to 5, both ends included. This wraps the hour.
+LTF Confirm: 0 to 15, both ends included.
+Qualify by: Close
+Timeframe Target: 15M
+Target Swing Length: 2
+Max Target: 2
+Order From: 10:05 New York
+Max Stop: 15 points
+One order per New York day.
+Flat At 15:55: on
+
+A lower-timeframe retest marks the overlapping higher-timeframe block
+retested, so a later block does not replace it. The order prints only while
+that block is still drawn and the signal candle trades it. A deleted block
+does not leave an entry. A candle under the block does not enter. Premium
+and discount, the 4-hour sweep, and the session rules stay. The indicator
+uses the same lifetime and the same signal check. Its window stays 9:00
+through 9:45.
+
+Fitted sample
+Trades                          2
+Net                             -15.00
+Profit factor                   0
+Drawdown                        38.75
+Worst loss                      -13.75
+Without the best trade          -15.00
+First half / second half        0.00 / -15.00
+Trades of 80 points or more     0
+
+0 wins, 2 losses. Gross profit 0.00, gross loss 15.00.
+There is no winning trade, so without the best trade is the full net.
+Both entries are after 1 August 2026.
+The drawdown is the drop from the marked equity peak to a later equity low
+across the two contracts. The 24 August short was 23.75 in profit, then
+closed at -13.75. The 25 September long closed another 1.25 lower.
+23.75 + 15.00 = 38.75. PyneCore's own segment equity drawdown is 13.75 on
+MESU6 and 1.25 on MESZ6. Those figures do not give back the 23.75 run-up.
+MESM6 placed no trade.
+
+24 August 2026 16:04 to 16:57 short, -13.75, -2.75 points. MESU6.
+Entry 7671.25, exit 7674.00. Run-up 23.75, trade drawdown 10.00.
+25 September 2026 16:14 to 16:15 long, -1.25, -0.25 points. MESZ6.
+Entry 7803.00, exit 7802.75. Run-up 0.00, trade drawdown 0.00.
+
+The same window with liquidity on, before this gate, is
+strategy-runs/pynecore/2026-11-05-8.txt, 0 trades. November 5 is outside
+this sample. PyneCore is not a TradingView compile.
