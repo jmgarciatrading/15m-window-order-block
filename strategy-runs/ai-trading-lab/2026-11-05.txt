@@ -1,0 +1,34 @@
+Strategy commit: c816bcdb832ebd75dcdb4dd64ea54aa5a2e0fc6b
+
+Stage 2. Lab replay of lab/window_order_block.py on the fitted sample,
+1 May 2026 through 30 October 2026. One MES contract, $5 per point, no commission.
+Each outright is replayed only while it is the daily volume leader.
+Bars: AI/ai-futures-trading-lab/data/mes-fut-20260501-20261030.ohlcv-1m.csv.zst
+Leaders: the sibling volume.json.
+MESM6 is 1 May through 12 June. MESU6 is 14 June through 13 September.
+MESZ6 is 14 September through 30 October. Times are New York.
+
+The 4-hour and 15-minute buckets use the same session anchor as the PyneCore
+symbol: Sunday 18:00 New York, and midnight New York Monday through Friday.
+A stop or target that trades fills on the one-minute path. The open walks to the
+nearer extreme first. An equal distance walks to the high first. A gap through
+the stop or the target fills at the open.
+
+Parameters match the strategy commit. Liquidity Timeframe is 4H. A 15-minute
+leg qualifies only after a same-direction sweep of the last closed 4-hour candle.
+The leg's first open is after that sweep.
+
+Fitted sample
+Trades                          22
+Net                             -63.75
+Profit factor                   0.700
+Drawdown                        110.00
+Worst loss                      -45.00
+Without the best trade          -111.25
+First half / second half        2.50 / -66.25
+Trades of 80 points or more     0
+
+The drawdown marks the open trade to the one-minute path, across all three contracts.
+MESM6 is 2 trades, net -35.00. MESU6 is 15 trades, net -21.25. MESZ6 is 5 trades, net -7.50.
+The same trade count as the Stage 1 book. MESU6 is 2.50 worse than PyneCore.
+Stage 1 is strategy-runs/pynecore/2026-11-05-7.txt, net -61.25.
