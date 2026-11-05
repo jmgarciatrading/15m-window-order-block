@@ -1,0 +1,50 @@
+Strategy commit: eda7a5e4bd56d457aa37e6e0f1ce03075e5476d3
+
+PyneCore run of 15M Window Order Block Strategy on the lab MES file,
+1 May 2026 through 30 October 2026. One MES contract, $5 per point, no commission.
+Each outright is replayed only while it is the daily volume leader.
+MESM6 is 1 May through 12 June. MESU6 is 14 June through 13 September.
+MESZ6 is 14 September through 30 October. Times are New York.
+
+Parameters
+HTF OB: 15
+LTF OB: empty, so the 1-minute chart
+Window: 9:30 until 16:00 New York. 16:00 is not included.
+Minute window: 0 to 60
+Skip Sundays: off
+Qualify by: Close
+Timeframe Target: 15M
+Target Swing Length: 2
+Max Target: 2
+Order From: 10:05 New York
+Max Stop: 15 points
+One order per New York day.
+Flat At 15:55: on. A same-day trade opened before 15:55 is closed at 15:55.
+A fill at 15:55 or later is not flattened. A trade held past midnight is not flattened.
+
+The window qualifies the HTF leg's first open. It does not filter the LTF retest.
+The indicator file is unchanged and still uses 9:00 through 9:45.
+
+Six months, closed trades chained in time.
+53 trades, 18 wins, 24 losses, 11 flat.
+Net -12.50. Gross profit 492.50, gross loss 505, profit factor 0.98.
+Closed-trade drawdown 155.
+Long net +168.75. Short net -181.25.
+May through August is -12.50 on 34 trades. September and October are 0 on 19 trades.
+Two trades closed at the 15:55 flat: 8 May +6.25 and 22 September -6.25.
+
+MESM6 net -71.25, equity drawdown 152.50, 11 trades.
+MESU6 net +66.25, equity drawdown 160, 27 trades.
+MESZ6 net -7.50, equity drawdown 38.75, 15 trades.
+
+Monthly closed-trade net:
+May -107.50, profit factor 0.23, drawdown 125, 8 trades, 2 wins, 4 losses, 2 flat.
+June +177.50, profit factor 2.73, drawdown 46.25, 10 trades, 5 wins, 5 losses.
+July -20, profit factor 0.56, drawdown 45, 6 trades, 1 win, 3 losses, 2 flat.
+August -62.50, profit factor 0.55, drawdown 113.75, 10 trades, 4 wins, 5 losses, 1 flat.
+September -12.50, profit factor 0.60, drawdown 20, 9 trades, 2 wins, 3 losses, 4 flat.
+October +12.50, profit factor 1.25, drawdown 36.25, 10 trades, 4 wins, 4 losses, 2 flat.
+
+The prior 9:00–9:45 book on the same orders, without this session, is
+strategy-runs/pynecore/2026-11-05-4.txt, net +281.25 on 21 trades.
+PyneCore is not a TradingView compile.
