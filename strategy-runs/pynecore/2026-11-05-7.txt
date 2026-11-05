@@ -1,0 +1,51 @@
+Strategy commit: c816bcdb832ebd75dcdb4dd64ea54aa5a2e0fc6b
+
+Stage 1. PyneCore run of 15M Window Order Block Strategy on the fitted sample,
+1 May 2026 through 30 October 2026. One MES contract, $5 per point, no commission.
+Each outright is replayed only while it is the daily volume leader.
+MESM6 is 1 May through 12 June. MESU6 is 14 June through 13 September.
+MESZ6 is 14 September through 30 October. Times are New York.
+
+Parameters
+HTF OB: 15
+LTF OB: empty, so the 1-minute chart
+Window: 9:30 until 16:00 New York. 16:00 is not included.
+Minute window: 0 to 60
+Skip Sundays: off
+Liquidity Timeframe: 4H
+Qualify by: Close
+Timeframe Target: 15M
+Target Swing Length: 2
+Max Target: 2
+Order From: 10:05 New York
+Max Stop: 15 points
+One order per New York day.
+Flat At 15:55: on
+
+A 15-minute leg qualifies only after price sweeps the last closed 4-hour candle
+and closes back inside it. A swept low allows a bullish leg. A swept high allows
+a bearish leg. The sweep stays valid until a later close goes back through that
+side. The leg's first open is after the sweep. The indicator file is unchanged.
+
+Fitted sample
+Trades                          22
+Net                             -61.25
+Profit factor                   0.707
+Drawdown                        105.00
+Worst loss                      -45.00
+Without the best trade          -108.75
+First half / second half        5.00 / -66.25
+Trades of 80 points or more     0
+
+7 wins, 10 losses, 5 flat. Gross profit 147.50, gross loss 208.75.
+The drawdown is PyneCore's equity drawdown on MESU6. The chained closed-trade
+drawdown is 96.25, from 22.50 on 29 June to -73.75 on 20 August.
+The best trade is the 27 August long, 47.50. The worst loss is the 5 August short.
+First half is entries before 1 August 2026.
+
+MESM6 net -35.00, equity drawdown 35.00, 2 trades.
+MESU6 net -18.75, equity drawdown 105.00, 15 trades.
+MESZ6 net -7.50, equity drawdown 30.00, 5 trades.
+
+The session book without this sweep is strategy-runs/pynecore/2026-11-05-6.txt,
+net -12.50 on 53 trades. PyneCore is not a TradingView compile.
