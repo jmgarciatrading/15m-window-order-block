@@ -1,0 +1,59 @@
+Strategy commit: 48cb9a9ad35acec937066f093f76bf7e0eb233b0
+
+Stage 2. Lab replay of 15M Window Order Block Strategy on the fitted sample,
+1 May 2026 through 30 October 2026. One MES contract, $5 per point, no commission.
+Each outright is replayed only while it is the daily volume leader.
+MESM6 is 1 May through 12 June. MESU6 is 14 June through 13 September.
+MESZ6 is 14 September through 30 October. Times are New York.
+The model is lab/window_order_block.py.
+
+Parameters
+HTF OB: 15
+LTF OB: the 1-minute bar
+Window: 9:30 until 16:00 New York. 16:00 is not included.
+Minute window: 0 to 60
+Skip Sundays: off
+Liquidity Timeframe: 4H
+HTF Confirm: 45 to 5, both ends included. This wraps the hour.
+LTF Confirm: 0 to 15, both ends included.
+Qualify by: Close
+Timeframe Target: 15M
+Target Swing Length: 2
+Max Target: 2
+Order From: 10:05 New York
+Max Stop: 15 points
+One order per New York day.
+Flat At 15:55: on
+
+The higher-timeframe block is the last block of the hour. Its confirming
+candle opens from :45 through :05. The lower-timeframe block has to overlap
+that block and confirm in the following hour's opening, from :00 through :15.
+The retest that prints the order has to fall in that same wick. A stop or
+target that trades fills on the one-minute path. The open walks to the nearer
+extreme first, and an equal distance walks to the high first. An open trade
+is marked to that path. The indicator file is unchanged.
+
+Fitted sample
+Trades                          0
+Net                             0.00
+Profit factor                   0.000
+Drawdown                        0.00
+Worst loss                      0.00
+Without the best trade          0.00
+First half / second half        0.00 / 0.00
+Trades of 80 points or more     0
+
+No order was placed. Profit factor is 0 because there is no gross profit and
+no gross loss. Mark-to-market drawdown is 0. Each segment ended flat.
+
+MESM6, MESU6, and MESZ6 each placed 0 trades. The book drew 17 higher-timeframe
+blocks in the confirm window, 12 at :45 and 5 at :00. Three lower-timeframe
+blocks confirmed and were retested inside the following opening:
+
+29 June 2026 15:07 long, stop 2.75 points, anchor 14:45.
+24 August 2026 16:00 short, stop 5.25 points, anchor 15:45.
+25 September 2026 16:03 long, stop 3.00 points, anchor 15:45.
+
+On each one the 15-minute swing target was closer than the stop, so the order
+stayed off. PyneCore placed no orders either. The 4-hour sweep book without
+this wick is strategy-runs/ai-trading-lab/2026-11-05.txt, net -63.75 on 22 trades.
