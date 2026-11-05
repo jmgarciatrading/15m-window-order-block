@@ -1,0 +1,60 @@
+Strategy commit: 2e6cc93fff66e1ed59456f9e03273177cdbadef0
+Cap a strategy swing target farther than twice the stop.
+
+PyneCore runs of 15M Window Order Block Strategy on MES 1-minute bars.
+The lab file ends 2026-10-30. One MES contract, $5 per point, no commission.
+Front month is the daily volume leader. October is MESZ6. September is MESU6
+through 13 September and MESZ6 from 14 September. Times are New York.
+
+Parameters
+HTF OB: 15
+LTF OB: empty (1-minute chart)
+Window: 9:00 through 9:45 New York
+Qualify by: Close
+Timeframe Target: 15M
+Target Swing Length: 2
+Show buy/sell signals: on
+Max Target: compared below
+
+October 1 through October 30, 30000 bars
+
+Max Target 0, the old default. 9 trades, all short, 2 wins and 7 losses.
+Net +71.25. Profit factor 1.826. Drawdown 75. The largest win is +112.50.
+Without that trade the book is -41.25. The 1 October 13:30 short ran 25.25
+points and then stopped for -6.25, because the 15-minute swing was 44.5 points
+away and a later short replaced the stop.
+
+Max Target 14, the single-candle chart value. Same 9 trades and the same
++71.25. Those swings were inside 14 times the stop and still beyond the move.
+
+Max Target 3. 9 trades, 3 wins. Net +101.25. Profit factor 2.246. The 1 October
+short still gave the open profit back.
+
+Max Target 2, now the strategy default. 10 trades, all short, 4 wins and 6 losses.
+Net +167.50. Gross profit 262.50, gross loss 95, profit factor 2.763.
+Drawdown 75. Largest win +112.50. Without that trade the book is +55.
+The 1 October short exits at 14:01 for +87.50.
+
+September 1 through September 30, 30120 bars
+
+Max Target 0. 5 trades, 4 longs and 1 short, 1 win and 4 losses.
+Net -30. Longs -61.25, the short +31.25. Drawdown 70.
+The 23 September 13:09 long ran 19.75 points and stopped for -13.75.
+
+Max Target 2. Same 5 trades, 3 wins and 2 losses.
+Net +108.75. Gross profit 130, gross loss 21.25, profit factor 6.118.
+Longs +77.50, the short +31.25. Drawdown 30.
+The 13:09 long exits at 13:42 for +46.25.
+
+Gates that were measured and not taken
+Entry before 10:05 would drop the 15 October 09:45 short, which is +45.
+A long more than 22 points above the 9:30 open does not touch the September
+longs. Those fills were about 55 points under that open.
+A stop wider than 30 points does not touch these trades. The stops are
+0.50 to 11.25 points.
+The last six 1-minute bars spanning 8 points fits the October losers and also
+drops winners. The single-candle gate was six 5-minute bars, and that
+30-minute span was at least 8 points on every October entry.
+
+PyneComp strict compile of the strategy succeeded. PyneCore is not a TradingView compile.
+The indicator file is unchanged. Its Max Target default is still 0.
